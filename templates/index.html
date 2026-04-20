@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rating UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap.min.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+</head>
+<body>
+  <div class="app-shell container-fluid py-4">
+    <header class="hero-panel mb-4">
+      <div>
+        <p class="eyebrow mb-2">Local Review Workspace</p>
+        <h1 class="mb-2">Prediction Rating UI</h1>
+        <p class="hero-copy mb-0">
+          Review model prediction images, mark wrong predictions, and export a training-ready zip package with JSON and CSV manifests.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <button class="btn btn-primary btn-lg d-none" id="choose-folder-btn" type="button">Choose Folder</button>
+        <button class="btn btn-light btn-lg" id="import-folder-btn" type="button">Import Folder From PC</button>
+        <button class="btn btn-outline-light btn-lg" id="export-btn" type="button" disabled>Export Selected Zip</button>
+        <button class="btn btn-outline-light btn-lg" id="export-filenames-btn" type="button" disabled>Export Selected TXT</button>
+      </div>
+    </header>
+
+    <section class="toolbar-panel mb-4">
+      <div class="row g-3 align-items-end">
+        <div class="col-xl-8">
+          <label class="form-label" for="folder-path-input">Selected folder</label>
+          <div class="input-group input-group-lg">
+            <input class="form-control" id="folder-path-input" placeholder="C:/path/to/prediction-images" type="text" />
+            <button class="btn btn-outline-secondary" id="load-folder-btn" type="button">Load Path</button>
+          </div>
+          <div class="form-text">Use `Load Path` for a folder on the server, or `Import Folder From PC` to upload a folder directly from the browser.</div>
+        </div>
+        <div class="col-xl-4">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-label">Progress</span>
+              <strong id="progress-count">0 / 0</strong>
+              <span class="stat-muted" id="progress-percent">0%</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Marked Wrong</span>
+              <strong id="selected-count">0</strong>
+              <span class="stat-muted">Queued for export</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Marked Correct</span>
+              <strong id="correct-count">0</strong>
+              <span class="stat-muted">Reviewed and kept</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-3 align-items-end mt-1">
+        <div class="col-xl-8">
+          <label class="form-label" for="target-folder-path-input">Target image path</label>
+          <div class="input-group input-group-lg">
+            <input class="form-control" id="target-folder-path-input" placeholder="C:/path/to/original-target-images" type="text" />
+            <button class="btn btn-outline-secondary" id="choose-target-folder-btn" type="button">Choose Target Folder</button>
+            <button class="btn btn-outline-secondary" id="save-target-folder-btn" type="button">Save Target Path</button>
+          </div>
+          <div class="form-text">Used during export to map each selected prediction image to the original target image with the same relative path.</div>
+        </div>
+      </div>
+      <div class="progress progress-lg mt-3">
+        <div class="progress-bar" id="progress-bar" role="progressbar" style="width: 0%;"></div>
+      </div>
+    </section>
+
+    <section class="review-layout">
+      <aside class="sidebar-panel">
+        <div class="sidebar-head">
+          <h2>Queue</h2>
+          <div class="filter-group" id="filter-group">
+            <button class="chip active" data-filter="unreviewed" type="button">Unreviewed</button>
+            <button class="chip" data-filter="reviewed" type="button">Reviewed</button>
+            <button class="chip" data-filter="selected" type="button">Selected</button>
+          </div>
+        </div>
+        <div class="queue-meta" id="queue-meta">No folder loaded.</div>
+        <div class="queue-list" id="queue-list"></div>
+      </aside>
+
+      <main class="viewer-panel">
+        <div class="viewer-topbar">
+          <div class="viewer-heading">
+            <p class="viewer-kicker mb-1">Image Review</p>
+            <h2 class="viewer-title" id="viewer-title">Load a folder to begin</h2>
+            <p class="viewer-subtitle mb-0" id="viewer-subtitle">Keyboard shortcuts: <kbd>A</kbd>/<kbd>D</kbd> navigate, <kbd>C</kbd> correct, <kbd>W</kbd> wrong, <kbd>U</kbd> reset.</p>
+          </div>
+          <div class="viewer-actions">
+            <button class="btn btn-outline-secondary" id="prev-btn" type="button" disabled>Previous</button>
+            <button class="btn btn-outline-secondary" id="next-btn" type="button" disabled>Next</button>
+          </div>
+        </div>
+
+        <div class="image-stage" id="image-stage">
+          <img alt="Prediction review preview" id="main-image" />
+          <div class="empty-stage" id="empty-stage">
+            <h3>Nothing to review yet</h3>
+            <p>Select a folder with prediction images to start rating.</p>
+          </div>
+        </div>
+
+        <div class="decision-panel">
+          <div class="decision-meta">
+            <span class="status-pill status-unreviewed" id="current-status">Unreviewed</span>
+            <span class="decision-timestamp" id="reviewed-at">No review timestamp</span>
+          </div>
+          <div class="decision-actions">
+            <button class="btn btn-success btn-lg" id="mark-correct-btn" type="button" disabled>Mark Correct</button>
+            <button class="btn btn-danger btn-lg" id="mark-wrong-btn" type="button" disabled>Mark Wrong / Export</button>
+            <button class="btn btn-outline-secondary btn-lg" id="clear-btn" type="button" disabled>Clear</button>
+          </div>
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <div class="toast-wrap">
+    <div class="app-toast" id="toast"></div>
+  </div>
+
+  <input id="browser-folder-input" type="file" webkitdirectory directory multiple hidden />
+
+  <script src="{{ url_for('static', path='app.js') }}"></script>
+</body>
+</html>
