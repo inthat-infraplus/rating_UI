@@ -12,8 +12,12 @@ from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 
 from .models import (
+    AreaCalculationRequest,
+    CsvLinkRequest,
     FolderRequest,
+    ImageAnnotationUpdateRequest,
     ReviewUpdateRequest,
+    ScaleProfileLinkRequest,
     SessionConfigUpdateRequest,
     UiStateUpdateRequest,
     to_payload_dict,
@@ -235,3 +239,145 @@ async def get_image(
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FileResponse(image_path)
+
+
+# --- CSV and annotation endpoints ---
+
+@app.post("/api/link-csv")
+async def link_csv(request: CsvLinkRequest) -> JSONResponse:
+    """Link a CSV results file (server path) to the current session."""
+    try:
+        session = await run_in_threadpool(
+            ReviewStore.open(request.folder_path).link_csv,
+            request.csv_path,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content={"session": to_payload_dict(session)})
+
+
+@app.post("/api/import-csv")
+async def import_csv(
+    folder_path: str = Form(...),
+    csv_file: UploadFile = File(...),
+) -> JSONResponse:
+    """Upload a CSV file from the browser and link it to the current session."""
+    if not folder_path:
+        raise HTTPException(status_code=400, detail="folder_path is required.")
+
+    csv_dir = import_root() / "csvs"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    original_name = csv_file.filename or "results.csv"
+    safe_name = "".join(
+        c if c.isalnum() or c in {"-", "_", "."} else "_" for c in original_name
+    )
+    timestamp_prefix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    saved_path = csv_dir / f"{timestamp_prefix}_{safe_name}"
+    saved_path.write_bytes(await csv_file.read())
+    await csv_file.close()
+
+    try:
+        session = await run_in_threadpool(
+            ReviewStore.open(folder_path).link_csv,
+            str(saved_path),
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return JSONResponse(content={"session": to_payload_dict(session)})
+
+
+@app.post("/api/annotations")
+async def update_annotations(request: ImageAnnotationUpdateRequest) -> JSONResponse:
+    """Save polygon annotations for a single image."""
+    try:
+        session = await run_in_threadpool(
+            ReviewStore.open(request.folder_path).update_annotations,
+            request.relative_path,
+            [poly.model_dump(mode="json") for poly in request.polygons],
+            request.image_natural_width,
+            request.image_natural_height,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content={"session": to_payload_dict(session)})
+
+
+@app.post("/api/link-scale-profile")
+async def link_scale_profile(request: ScaleProfileLinkRequest) -> JSONResponse:
+    """Link a scale_profile.csv (server path) for pixel-to-metre calculations."""
+    try:
+        session = await run_in_threadpool(
+            ReviewStore.open(request.folder_path).link_scale_profile,
+            request.scale_profile_path,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content={"session": to_payload_dict(session)})
+
+
+@app.post("/api/import-scale-profile")
+async def import_scale_profile(
+    folder_path: str = Form(...),
+    scale_file: UploadFile = File(...),
+) -> JSONResponse:
+    """Upload a scale_profile.csv from the browser and link it to the current session."""
+    if not folder_path:
+        raise HTTPException(status_code=400, detail="folder_path is required.")
+
+    csv_dir = import_root() / "scale_profiles"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    original_name = scale_file.filename or "scale_profile.csv"
+    safe_name = "".join(c if c.isalnum() or c in {"-", "_", "."} else "_" for c in original_name)
+    timestamp_prefix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    saved_path = csv_dir / f"{timestamp_prefix}_{safe_name}"
+    saved_path.write_bytes(await scale_file.read())
+    await scale_file.close()
+
+    try:
+        session = await run_in_threadpool(
+            ReviewStore.open(folder_path).link_scale_profile,
+            str(saved_path),
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return JSONResponse(content={"session": to_payload_dict(session)})
+
+
+@app.post("/api/calculate-area")
+async def calculate_area(request: AreaCalculationRequest) -> JSONResponse:
+    """Calculate real-world area (m²) or crack length (m) for a polygon."""
+    try:
+        points_dicts = [p.model_dump(mode="json") for p in request.points]
+        value, unit = await run_in_threadpool(
+            ReviewStore.open(request.folder_path).calculate_polygon_metrics,
+            request.class_label,
+            points_dicts,
+            request.image_natural_width,
+            request.image_natural_height,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(content={"value": value, "unit": unit})
+
+
+@app.post("/api/export-updated-csv")
+async def export_updated_csv(request: FolderRequest) -> FileResponse:
+    """Export an updated CSV with polygon corrections applied to wrong-marked images."""
+    try:
+        export_path, export_name, _ = await run_in_threadpool(
+            ReviewStore.open(request.folder_path).export_updated_csv
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(
+        export_path,
+        media_type="text/csv; charset=utf-8",
+        filename=export_name,
+        background=BackgroundTask(lambda path=export_path: path.unlink(missing_ok=True)),
+    )

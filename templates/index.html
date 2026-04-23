@@ -9,68 +9,210 @@
 </head>
 <body>
   <div class="app-shell container-fluid py-4">
+
+    <!-- ── Workflow guide — very top ────────────────────────────────────────── -->
+    <div class="workflow-panel mb-4">
+      <div class="wf-steps-wrap">
+
+        <div class="wf-step" id="wf1">
+          <div class="wf-circle">1</div>
+          <div class="wf-label">
+            <div class="wf-title">Load Images</div>
+            <div class="wf-desc">Paste path or import from PC</div>
+          </div>
+        </div>
+
+        <div class="wf-line" id="wf-line-1"></div>
+
+        <div class="wf-step" id="wf2">
+          <div class="wf-circle">2</div>
+          <div class="wf-label">
+            <div class="wf-title">Link CSV <span class="wf-opt-tag">optional</span></div>
+            <div class="wf-desc">Show bounding boxes</div>
+          </div>
+        </div>
+
+        <div class="wf-line" id="wf-line-2"></div>
+
+        <div class="wf-step" id="wf3">
+          <div class="wf-circle">3</div>
+          <div class="wf-label">
+            <div class="wf-title">Scale Profile <span class="wf-opt-tag">optional</span></div>
+            <div class="wf-desc">Auto area / length</div>
+          </div>
+        </div>
+
+        <div class="wf-line" id="wf-line-3"></div>
+
+        <div class="wf-step" id="wf4">
+          <div class="wf-circle">4</div>
+          <div class="wf-label">
+            <div class="wf-title">Review Images</div>
+            <div class="wf-desc">Mark correct or wrong</div>
+          </div>
+        </div>
+
+        <div class="wf-line" id="wf-line-4"></div>
+
+        <div class="wf-step" id="wf5">
+          <div class="wf-circle">5</div>
+          <div class="wf-label">
+            <div class="wf-title">Export</div>
+            <div class="wf-desc">ZIP · TXT · Updated CSV</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Hero ─────────────────────────────────────────────────────────────── -->
     <header class="hero-panel mb-4">
       <div>
         <p class="eyebrow mb-2">Local Review Workspace</p>
-        <h1 class="mb-2">Prediction Rating UI</h1>
+        <h1 class="mb-1">Prediction Rating UI</h1>
         <p class="hero-copy mb-0">
-          Review model prediction images, mark wrong predictions, and export a training-ready zip package with JSON and CSV manifests.
+          Rate model prediction images, draw polygon corrections on wrong detections, and export an updated CSV.
         </p>
       </div>
       <div class="hero-actions">
+        <button class="btn btn-light btn-lg" id="import-folder-btn" type="button">📂 Import Folder From PC</button>
         <button class="btn btn-primary btn-lg d-none" id="choose-folder-btn" type="button">Choose Folder</button>
-        <button class="btn btn-light btn-lg" id="import-folder-btn" type="button">Import Folder From PC</button>
-        <button class="btn btn-outline-light btn-lg" id="export-btn" type="button" disabled>Export Selected Zip</button>
-        <button class="btn btn-outline-light btn-lg" id="export-filenames-btn" type="button" disabled>Export Selected TXT</button>
       </div>
     </header>
 
+    <!-- ── Setup panel ───────────────────────────────────────────────────────── -->
     <section class="toolbar-panel mb-4">
-      <div class="row g-3 align-items-end">
-        <div class="col-xl-8">
-          <label class="form-label" for="folder-path-input">Selected folder</label>
-          <div class="input-group input-group-lg">
-            <input class="form-control" id="folder-path-input" placeholder="C:/path/to/prediction-images" type="text" />
-            <button class="btn btn-outline-secondary" id="load-folder-btn" type="button">Load Path</button>
+
+      <!-- Step 1 — Load Images -->
+      <div class="setup-row">
+        <div class="step-num" id="step-num-1">1</div>
+        <div class="step-body">
+          <div class="step-title">Load Prediction Images
+            <span class="step-hint">Paste the server folder path and click Load Path, or use the Import Folder button above.</span>
           </div>
-          <div class="form-text">Use `Load Path` for a folder on the server, or `Import Folder From PC` to upload a folder directly from the browser.</div>
+          <div class="row g-2 align-items-center mt-1">
+            <div class="col-xl-7">
+              <div class="input-group">
+                <input class="form-control" id="folder-path-input" placeholder="C:/path/to/prediction-images" type="text" />
+                <button class="btn btn-outline-secondary" id="load-folder-btn" type="button">Load Path</button>
+              </div>
+            </div>
+            <div class="col-xl-5">
+              <div class="stats-grid">
+                <div class="stat-card">
+                  <span class="stat-label">Progress</span>
+                  <strong id="progress-count">0 / 0</strong>
+                  <span class="stat-muted" id="progress-percent">0%</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Correct</span>
+                  <strong id="correct-count">0</strong>
+                  <span class="stat-muted">verified</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Wrong</span>
+                  <strong id="selected-count">0</strong>
+                  <span class="stat-muted">flagged</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Annotated</span>
+                  <strong id="annotated-count">0</strong>
+                  <span class="stat-muted">polygons</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="progress progress-lg mt-2">
+            <div class="progress-bar" id="progress-bar" role="progressbar" style="width: 0%;"></div>
+          </div>
         </div>
-        <div class="col-xl-4">
-          <div class="stats-grid">
-            <div class="stat-card">
-              <span class="stat-label">Progress</span>
-              <strong id="progress-count">0 / 0</strong>
-              <span class="stat-muted" id="progress-percent">0%</span>
+      </div>
+
+      <!-- Step 2 — Link Results CSV (optional) -->
+      <div class="setup-row">
+        <div class="step-num step-opt" id="step-num-2">2</div>
+        <div class="step-body">
+          <div class="step-title">
+            Link Results CSV
+            <span class="badge-optional">Optional</span>
+            <span class="step-hint">Displays model bounding boxes on images. Required if you want to export an updated CSV with polygon corrections.</span>
+          </div>
+          <div class="row g-2 align-items-center mt-1">
+            <div class="col-xl-7">
+              <div class="input-group">
+                <input class="form-control" id="csv-path-input" placeholder="C:/path/to/detailed_results.csv" type="text" />
+                <button class="btn btn-outline-secondary" id="load-csv-path-btn" type="button">Load Path</button>
+                <button class="btn btn-outline-secondary" id="browse-csv-btn" type="button">Browse…</button>
+              </div>
             </div>
-            <div class="stat-card">
-              <span class="stat-label">Marked Wrong</span>
-              <strong id="selected-count">0</strong>
-              <span class="stat-muted">Queued for export</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Marked Correct</span>
-              <strong id="correct-count">0</strong>
-              <span class="stat-muted">Reviewed and kept</span>
+            <div class="col-xl-5 d-flex align-items-center gap-3 flex-wrap">
+              <div class="csv-status-text" id="csv-status-text">No CSV linked</div>
+              <button class="btn btn-primary btn-sm" id="export-csv-btn" type="button" disabled>Export Updated CSV</button>
             </div>
           </div>
         </div>
       </div>
-      <div class="row g-3 align-items-end mt-1">
-        <div class="col-xl-8">
-          <label class="form-label" for="target-folder-path-input">Target image path</label>
-          <div class="input-group input-group-lg">
-            <input class="form-control" id="target-folder-path-input" placeholder="C:/path/to/original-target-images" type="text" />
-            <button class="btn btn-outline-secondary" id="choose-target-folder-btn" type="button">Choose Target Folder</button>
-            <button class="btn btn-outline-secondary" id="save-target-folder-btn" type="button">Save Target Path</button>
+
+      <!-- Step 3 — Link Scale Profile (optional) -->
+      <div class="setup-row">
+        <div class="step-num step-opt" id="step-num-3">3</div>
+        <div class="step-body">
+          <div class="step-title">
+            Link Scale Profile
+            <span class="badge-optional">Optional</span>
+            <span class="step-hint">XenomatiX per-row pixel-to-metre calibration. When linked, polygon area (m²) or crack length (m) is auto-calculated as you draw.</span>
           </div>
-          <div class="form-text">Used during export to map each selected prediction image to the original target image with the same relative path.</div>
+          <div class="row g-2 align-items-center mt-1">
+            <div class="col-xl-7">
+              <div class="input-group">
+                <input class="form-control" id="scale-profile-path-input" placeholder="D:/path/to/scale_profile.csv" type="text" />
+                <button class="btn btn-outline-secondary" id="load-scale-profile-btn" type="button">Load Path</button>
+                <button class="btn btn-outline-secondary" id="browse-scale-profile-btn" type="button">Browse…</button>
+              </div>
+            </div>
+            <div class="col-xl-5 d-flex align-items-center">
+              <div class="scale-status-text" id="scale-status-text">No scale profile linked</div>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="progress progress-lg mt-3">
-        <div class="progress-bar" id="progress-bar" role="progressbar" style="width: 0%;"></div>
+
+      <!-- Step 4 — Review (passive row, no inputs) -->
+      <div class="setup-row setup-row-info">
+        <div class="step-num" id="step-num-4">4</div>
+        <div class="step-body">
+          <div class="step-title">Review Images
+            <span class="step-hint">Use the image panel below. Press <kbd>C</kbd> = Correct &nbsp;·&nbsp; <kbd>W</kbd> = Wrong &nbsp;·&nbsp; <kbd>A</kbd>/<kbd>D</kbd> = navigate &nbsp;·&nbsp; <kbd>P</kbd> = draw polygon &nbsp;·&nbsp; <kbd>Esc</kbd> = cancel draw</span>
+          </div>
+        </div>
       </div>
+
+      <!-- Step 5 — Export -->
+      <div class="setup-row">
+        <div class="step-num" id="step-num-5">5</div>
+        <div class="step-body">
+          <div class="step-title">Export Results
+            <span class="step-hint">ZIP export requires a target image folder. TXT and updated CSV work without it.</span>
+          </div>
+          <div class="row g-2 align-items-center mt-1">
+            <div class="col-xl-7">
+              <div class="input-group">
+                <input class="form-control" id="target-folder-path-input" placeholder="C:/path/to/original-images  (needed for ZIP export only)" type="text" />
+                <button class="btn btn-outline-secondary" id="choose-target-folder-btn" type="button">Choose…</button>
+                <button class="btn btn-outline-secondary" id="save-target-folder-btn" type="button">Save</button>
+              </div>
+            </div>
+            <div class="col-xl-5 d-flex align-items-center gap-2 flex-wrap">
+              <button class="btn btn-outline-primary btn-sm" id="export-btn" type="button" disabled>Export ZIP</button>
+              <button class="btn btn-outline-primary btn-sm" id="export-filenames-btn" type="button" disabled>Export TXT</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </section>
 
+    <!-- ── Review layout ─────────────────────────────────────────────────────── -->
     <section class="review-layout">
       <aside class="sidebar-panel">
         <div class="sidebar-head">
@@ -81,40 +223,77 @@
             <button class="chip" data-filter="selected" type="button">Selected</button>
           </div>
         </div>
-        <div class="queue-meta" id="queue-meta">No folder loaded.</div>
+        <div class="queue-meta" id="queue-meta">No folder loaded — complete Step 1 above.</div>
         <div class="queue-list" id="queue-list"></div>
       </aside>
 
       <main class="viewer-panel">
         <div class="viewer-topbar">
           <div class="viewer-heading">
-            <p class="viewer-kicker mb-1">Image Review</p>
+            <p class="viewer-kicker mb-1">Step 4 — Image Review</p>
             <h2 class="viewer-title" id="viewer-title">Load a folder to begin</h2>
-            <p class="viewer-subtitle mb-0" id="viewer-subtitle">Keyboard shortcuts: <kbd>A</kbd>/<kbd>D</kbd> navigate, <kbd>C</kbd> correct, <kbd>W</kbd> wrong, <kbd>U</kbd> reset.</p>
+            <p class="viewer-subtitle mb-0" id="viewer-subtitle">Complete Step 1 above, then images will appear here for review.</p>
           </div>
           <div class="viewer-actions">
-            <button class="btn btn-outline-secondary" id="prev-btn" type="button" disabled>Previous</button>
-            <button class="btn btn-outline-secondary" id="next-btn" type="button" disabled>Next</button>
+            <button class="btn btn-outline-secondary" id="prev-btn" type="button" disabled>← Prev</button>
+            <button class="btn btn-outline-secondary" id="next-btn" type="button" disabled>Next →</button>
           </div>
         </div>
 
+        <!-- Bbox toggle (shown when CSV is linked) -->
+        <div class="bbox-toggle-row" id="bbox-toggle-row" style="display:none">
+          <label class="bbox-toggle-label">
+            <input type="checkbox" id="bbox-toggle" />
+            Show model bounding boxes
+          </label>
+          <span class="bbox-legend" id="bbox-legend"></span>
+        </div>
+
         <div class="image-stage" id="image-stage">
-          <img alt="Prediction review preview" id="main-image" />
+          <div class="image-canvas-wrap" id="image-canvas-wrap">
+            <img alt="Prediction review preview" id="main-image" />
+            <svg class="bbox-overlay" id="bbox-overlay" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+            <canvas class="annotation-canvas" id="annotation-canvas"></canvas>
+          </div>
           <div class="empty-stage" id="empty-stage">
-            <h3>Nothing to review yet</h3>
-            <p>Select a folder with prediction images to start rating.</p>
+            <div class="empty-stage-icon">🖼️</div>
+            <h3>No images loaded yet</h3>
+            <p>Complete <strong>Step 1</strong> in the setup panel above:<br>
+              paste a folder path and click <strong>Load Path</strong>, or click<br>
+              <strong>Import Folder From PC</strong> at the top right.</p>
+          </div>
+        </div>
+
+        <!-- Annotation toolbar — visible only when current image is marked Wrong -->
+        <div class="annotation-toolbar" id="annotation-toolbar" style="display:none">
+          <div class="annot-left">
+            <span class="annot-label">Draw correction polygon:</span>
+            <select class="form-select form-select-sm annot-class-select" id="class-select">
+              <option value="alligator crack">Alligator Crack</option>
+              <option value="crack">Crack</option>
+              <option value="patching">Patching</option>
+              <option value="pothole">Pothole</option>
+              <option value="pavement">Pavement (CC)</option>
+            </select>
+            <button class="btn btn-sm btn-outline-primary" id="draw-polygon-btn" type="button">✏️ Draw Polygon</button>
+            <button class="btn btn-sm btn-outline-secondary" id="undo-polygon-btn" type="button">Undo</button>
+            <button class="btn btn-sm btn-outline-danger" id="clear-polygons-btn" type="button">Clear All</button>
+          </div>
+          <div class="annot-right">
+            <span class="annot-count" id="polygon-count">0 polygons</span>
+            <span class="annot-hint" id="annot-hint" style="display:none">Click to place points &nbsp;·&nbsp; double-click or click first point to close</span>
           </div>
         </div>
 
         <div class="decision-panel">
           <div class="decision-meta">
             <span class="status-pill status-unreviewed" id="current-status">Unreviewed</span>
-            <span class="decision-timestamp" id="reviewed-at">No review timestamp</span>
+            <span class="decision-timestamp" id="reviewed-at">Not yet reviewed</span>
           </div>
           <div class="decision-actions">
-            <button class="btn btn-success btn-lg" id="mark-correct-btn" type="button" disabled>Mark Correct</button>
-            <button class="btn btn-danger btn-lg" id="mark-wrong-btn" type="button" disabled>Mark Wrong / Export</button>
-            <button class="btn btn-outline-secondary btn-lg" id="clear-btn" type="button" disabled>Clear</button>
+            <button class="btn btn-success btn-lg" id="mark-correct-btn" type="button" disabled>✓ Correct</button>
+            <button class="btn btn-danger btn-lg" id="mark-wrong-btn" type="button" disabled>✗ Wrong</button>
+            <button class="btn btn-outline-secondary btn-lg" id="clear-btn" type="button" disabled>Reset</button>
           </div>
         </div>
       </main>
@@ -125,7 +304,10 @@
     <div class="app-toast" id="toast"></div>
   </div>
 
+  <!-- Hidden file inputs -->
   <input id="browser-folder-input" type="file" webkitdirectory directory multiple hidden />
+  <input id="csv-file-input" type="file" accept=".csv" hidden />
+  <input id="scale-profile-file-input" type="file" accept=".csv" hidden />
 
   <script src="{{ url_for('static', path='app.js') }}"></script>
 </body>

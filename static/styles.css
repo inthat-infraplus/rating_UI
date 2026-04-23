@@ -87,10 +87,11 @@ body {
   padding: 1.5rem;
 }
 
+/* 4-column stats grid */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.85rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
 }
 
 .stat-card {
@@ -109,12 +110,219 @@ body {
 }
 
 .stat-card strong {
-  font-size: 1.45rem;
+  font-size: 1.35rem;
 }
 
 .stat-muted {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+}
+
+/* CSV status */
+.csv-status-text {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+  word-break: break-all;
+}
+
+.csv-status-linked {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* Scale profile status */
+.scale-status-text {
+  font-size: 0.88rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.scale-status-linked {
+  color: #5b21b6;
+  font-weight: 600;
+}
+
+/* ── Workflow guide panel ─────────────────────────────────────────────────── */
+.workflow-panel {
+  background: var(--panel-bg);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow);
+  padding: 1.5rem 2.5rem;
+  backdrop-filter: blur(14px);
+}
+
+/* Outer flex row: [step] [line] [step] [line] … */
+.wf-steps-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* ── Step item: circle LEFT, text RIGHT ─────── */
+.wf-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Circle */
+.wf-circle {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #dde6ec;
+  color: #9ab0bc;
+  font-size: 1rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 300ms, color 300ms, box-shadow 300ms;
+}
+
+.wf-step.done .wf-circle {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(11, 110, 79, 0.28);
+}
+
+/* Text block to the right of circle */
+.wf-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.wf-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #b8c8d1;
+  white-space: nowrap;
+  transition: color 300ms;
+}
+
+.wf-step.done .wf-title {
+  color: #18313f;
+}
+
+.wf-desc {
+  font-size: 0.74rem;
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0.45;
+  transition: opacity 300ms;
+}
+
+.wf-step.done .wf-desc {
+  opacity: 1;
+}
+
+/* ── Connector line between steps ───────────── */
+.wf-line {
+  flex: 1;
+  min-width: 24px;
+  height: 2px;
+  background: #dde6ec;
+  border-radius: 2px;
+  transition: background 300ms;
+}
+
+.wf-line.done {
+  background: var(--accent);
+}
+
+/* ── Optional tag ───────────────────────────── */
+.wf-opt-tag {
+  display: inline-block;
+  background: #e9eff4;
+  color: #496170;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0.1rem 0.42rem;
+  border-radius: 999px;
+  vertical-align: middle;
+  letter-spacing: 0.03em;
+  margin-left: 0.25rem;
+}
+
+/* ── Setup step rows ─────────────────────────────────────────────────────── */
+.setup-row {
+  display: flex;
+  gap: 1rem;
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.setup-row:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.setup-row-info {
+  background: #f8fbfc;
+  border-radius: 12px;
+  padding: 0.65rem 0.9rem;
+  border-top: none;
+  margin-top: 0.5rem;
+  border: 1px solid var(--line);
+}
+
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #b0bec5;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 0.05rem;
+  transition: background 200ms ease;
+}
+
+.step-num.step-opt {
+  background: #b0bec5;
+}
+
+.step-num.done {
+  background: var(--accent);
+}
+
+.step-body {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.step-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #18313f;
+  line-height: 1.5;
+}
+
+.step-hint {
+  font-weight: 400;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.badge-optional {
+  display: inline-block;
+  background: #e9eff4;
+  color: #496170;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  vertical-align: middle;
+  margin-left: 0.3rem;
+  letter-spacing: 0.04em;
 }
 
 .bottom-card,
@@ -226,14 +434,8 @@ body {
   scrollbar-gutter: stable;
 }
 
-.queue-list::-webkit-scrollbar {
-  width: 10px;
-}
-
-.queue-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+.queue-list::-webkit-scrollbar { width: 10px; }
+.queue-list::-webkit-scrollbar-track { background: transparent; }
 .queue-list::-webkit-scrollbar-thumb {
   background: rgba(24, 49, 63, 0.18);
   border-radius: 999px;
@@ -296,21 +498,12 @@ body {
   font-weight: 700;
 }
 
-.badge-unreviewed {
-  background: #e9eff4;
-  color: #496170;
-}
+.badge-unreviewed { background: #e9eff4; color: #496170; }
+.badge-correct    { background: var(--success-soft); color: var(--accent-strong); }
+.badge-wrong      { background: var(--danger-soft); color: var(--danger); }
+.badge-annotated  { background: #ede9fe; color: #5b21b6; }
 
-.badge-correct {
-  background: var(--success-soft);
-  color: var(--accent-strong);
-}
-
-.badge-wrong {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
+/* ── Viewer panel ─────────────────────────────────────────────────────────── */
 .viewer-panel {
   display: flex;
   flex-direction: column;
@@ -352,33 +545,85 @@ body {
   align-self: flex-start;
 }
 
+/* ── Bbox toggle row ──────────────────────────────────────────────────────── */
+.bbox-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  background: #f0f6f9;
+  border: 1px solid var(--line);
+  font-size: 0.88rem;
+}
+
+.bbox-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  color: #18313f;
+  margin: 0;
+}
+
+.bbox-legend {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* ── Image stage + canvas stack ───────────────────────────────────────────── */
 .image-stage {
   position: relative;
-  min-height: 58vh;
+  min-height: 52vh;
   border-radius: 24px;
   border: 1px dashed rgba(7, 59, 76, 0.2);
   background:
     linear-gradient(135deg, rgba(7, 59, 76, 0.05), rgba(78, 205, 196, 0.06)),
     #f9fcfd;
   overflow: hidden;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.image-stage img {
-  display: none;
-  max-width: 100%;
-  max-height: 58vh;
-  object-fit: contain;
-  padding: 1.2rem;
+.image-canvas-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
 }
 
-.image-stage.ready img {
+.image-canvas-wrap img {
   display: block;
+  max-width: 100%;
+  max-height: 52vh;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
-.image-stage.ready .empty-stage {
-  display: none;
+.bbox-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.annotation-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* enabled only in draw mode via JS */
+}
+
+.annotation-canvas.draw-mode {
+  cursor: crosshair;
 }
 
 .empty-stage {
@@ -387,6 +632,65 @@ body {
   color: var(--muted);
 }
 
+/* ── Annotation toolbar ───────────────────────────────────────────────────── */
+.annotation-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  border-radius: 16px;
+  background: #f0f6f9;
+  border: 1.5px solid rgba(91, 33, 182, 0.18);
+}
+
+.annot-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.annot-label {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: #18313f;
+  white-space: nowrap;
+}
+
+.annot-class-select {
+  width: auto;
+}
+
+.annot-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.annot-count {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #5b21b6;
+  white-space: nowrap;
+}
+
+.annot-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Active draw polygon button */
+.btn-outline-primary.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+/* ── Decision panel ───────────────────────────────────────────────────────── */
 .decision-panel {
   display: flex;
   justify-content: space-between;
@@ -413,20 +717,9 @@ body {
   font-weight: 700;
 }
 
-.status-unreviewed {
-  background: #e9eff4;
-  color: #496170;
-}
-
-.status-correct {
-  background: var(--success-soft);
-  color: var(--accent-strong);
-}
-
-.status-wrong {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
+.status-unreviewed { background: #e9eff4; color: #496170; }
+.status-correct    { background: var(--success-soft); color: var(--accent-strong); }
+.status-wrong      { background: var(--danger-soft); color: var(--danger); }
 
 .decision-timestamp {
   color: var(--muted);
@@ -438,6 +731,7 @@ body {
   flex-wrap: wrap;
 }
 
+/* ── Toast ────────────────────────────────────────────────────────────────── */
 .toast-wrap {
   position: fixed;
   right: 24px;
@@ -472,14 +766,19 @@ kbd {
   font-size: 0.8rem;
 }
 
+/* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 1100px) {
+  .workflow-panel {
+    padding: 1.25rem 1.5rem;
+  }
+
   .review-layout,
   .hero-panel {
     grid-template-columns: 1fr;
   }
 
   .stats-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .hero-actions {
@@ -495,6 +794,26 @@ kbd {
 }
 
 @media (max-width: 768px) {
+  .workflow-panel {
+    padding: 1rem;
+  }
+
+  .wf-steps-wrap {
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .wf-step {
+    flex: 0 0 auto;
+    width: 80px;
+  }
+
+  /* Hide connector lines on mobile */
+  .wf-step:not(:last-child)::after {
+    display: none;
+  }
+
   .toolbar-panel,
   .bottom-panel,
   .sidebar-panel,
@@ -518,5 +837,23 @@ kbd {
   .viewer-actions > *,
   .hero-actions > * {
     flex: 1 1 auto;
+  }
+
+  .annotation-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .annot-left,
+  .annot-right {
+    width: 100%;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .annot-hint {
+    white-space: normal;
   }
 }
