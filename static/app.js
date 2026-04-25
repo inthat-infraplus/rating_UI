@@ -1346,9 +1346,12 @@ window.addEventListener("keydown", async (event) => {
 // When the page is rendered as /tasks/{id}, an inline script in index.html
 // stashes {task_id, user} on window.__rating_ui_task. We fetch the task,
 // flip ASSIGNED→IN_PROGRESS for L2 assignees, and auto-load its paths.
+const taskCtx = { task: null, user: null }; // populated by initFromTask
+
 async function initFromTask(taskInfo) {
   const navTitle = document.getElementById("task-nav-title");
   const navStatus = document.getElementById("task-nav-status");
+  taskCtx.user = taskInfo.user || {};
 
   let task;
   try {
@@ -1360,17 +1363,15 @@ async function initFromTask(taskInfo) {
     return;
   }
 
-  if (navTitle) navTitle.textContent = task.title || `Task #${task.id}`;
-  if (navStatus) {
-    navStatus.textContent = (task.status || "").replace("_", " ");
-    navStatus.className = `status-pill status-${task.status}`;
-    navStatus.style.display = "inline-flex";
-  }
-
-  // Mark started — best-effort, ignores for L1 viewers + no-ops if already in progress.
+  // Mark started first — for L2 this flips assigned→in_progress before we render.
   try {
-    await api(`/api/tasks/${task.id}/start`, { method: "POST", body: "{}" });
+    const res = await api(`/api/tasks/${task.id}/start`, { method: "POST", body: "{}" });
+    task = (await res.json()).task;
   } catch { /* non-fatal */ }
+
+  taskCtx.task = task;
+  renderTaskHeader();
+  wireTaskActions();
 
   if (!task.folder_path) {
     showToast("This task has no image folder yet — ask the reviewer to set one.");
@@ -1400,6 +1401,243 @@ async function initFromTask(taskInfo) {
     try { await saveTargetFolderPath(); }
     catch (err) { showToast(`Target folder failed: ${err.message}`); }
   }
+}
+
+// ── Task header / action bar / comments ─────────────────────────────────────
+function renderTaskHeader() {
+  const task = taskCtx.task;
+  const user = taskCtx.user;
+  if (!task) return;
+
+  const navTitle = document.getElementById("task-nav-title");
+  const navStatus = document.getElementById("task-nav-status");
+  if (navTitle) navTitle.textContent = task.title || `Task #${task.id}`;
+  if (navStatus) {
+    navStatus.textContent = (task.status || "").replace("_", " ");
+    navStatus.className = `status-pill status-${task.status}`;
+    navStatus.style.display = "inline-flex";
+  }
+
+  const bar = document.getElementById("task-action-bar");
+  const desc = document.getElementById("task-action-desc");
+  const meta = document.getElementById("task-action-meta");
+  const btns = document.getElementById("task-action-buttons");
+  if (!bar) return;
+
+  bar.style.display = "flex";
+  desc.textContent = task.description || "(no description)";
+  const metaParts = [];
+  if (task.assignee_username) metaParts.push(`Assigned to ${task.assignee_username}`);
+  if (task.due_date) metaParts.push(`Due ${task.due_date}`);
+  if (task.creator_username) metaParts.push(`Created by ${task.creator_username}`);
+  meta.textContent = metaParts.join(" · ");
+
+  // Role + status driven action buttons
+  btns.innerHTML = "";
+  const role = (user.role || "").toUpperCase();
+  const isAssignee = task.assigned_to === user.id;
+  const status = task.status;
+
+  if (role === "L2" && isAssignee && ["in_progress","assigned","returned"].includes(status)) {
+    btns.appendChild(makeActionBtn("Submit for QC", "btn-success", async () => {
+      if (!confirm("Submit this task for QC? You won't be able to edit it after.")) return;
+      const res = await api(`/api/tasks/${task.id}/submit`, { method: "POST", body: "{}" });
+      taskCtx.task = (await res.json()).task;
+      renderTaskHeader();
+      showToast("Submitted for QC.");
+    }));
+  }
+
+  if (role === "L1" && ["submitted","in_qc"].includes(status)) {
+    btns.appendChild(makeActionBtn("Approve", "btn-success", async () => {
+      if (!confirm("Approve this task?")) return;
+      const res = await api(`/api/tasks/${task.id}/approve`, { method: "POST", body: "{}" });
+      taskCtx.task = (await res.json()).task;
+      renderTaskHeader();
+      showToast("Approved.");
+    }));
+    btns.appendChild(makeActionBtn("Return with comment", "btn-warning", () => openReturnModal()));
+  }
+
+  // Refresh comment count badge
+  refreshCommentCount();
+}
+
+function makeActionBtn(label, btnClass, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `btn btn-sm ${btnClass}`;
+  b.textContent = label;
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    try { await onClick(); }
+    catch (err) { showToast(err.message || "Action failed."); }
+    finally { b.disabled = false; }
+  });
+  return b;
+}
+
+function wireTaskActions() {
+  // Comments modal
+  const commentsBtn = document.getElementById("task-comments-btn");
+  const commentsModal = document.getElementById("comments-modal");
+  const commentsClose = document.getElementById("comments-close");
+  const commentForm = document.getElementById("comment-form");
+  const commentInput = document.getElementById("comment-input");
+  const commentsError = document.getElementById("comments-error");
+
+  if (commentsBtn) {
+    commentsBtn.addEventListener("click", async () => {
+      commentsModal.classList.remove("hidden");
+      await renderCommentsThread();
+      commentInput.focus();
+    });
+  }
+  if (commentsClose) {
+    commentsClose.addEventListener("click", () => commentsModal.classList.add("hidden"));
+  }
+  if (commentsModal) {
+    commentsModal.addEventListener("click", (e) => {
+      if (e.target === commentsModal) commentsModal.classList.add("hidden");
+    });
+  }
+  if (commentForm) {
+    commentForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      commentsError.style.display = "none";
+      const message = (commentInput.value || "").trim();
+      if (!message) return;
+      try {
+        await api(`/api/tasks/${taskCtx.task.id}/events`, {
+          method: "POST",
+          body: JSON.stringify({ message }),
+        });
+        commentInput.value = "";
+        await renderCommentsThread();
+        refreshCommentCount();
+      } catch (err) {
+        commentsError.textContent = err.message || "Failed to post comment.";
+        commentsError.style.display = "block";
+      }
+    });
+  }
+
+  // Return-with-message modal (L1)
+  const returnModal = document.getElementById("return-modal");
+  const returnClose = document.getElementById("return-close");
+  const returnCancel = document.getElementById("return-cancel");
+  const returnForm = document.getElementById("return-form");
+  const returnMessage = document.getElementById("return-message");
+  const returnError = document.getElementById("return-error");
+
+  function closeReturnModal() {
+    returnModal.classList.add("hidden");
+    returnError.style.display = "none";
+    returnMessage.value = "";
+  }
+
+  if (returnClose) returnClose.addEventListener("click", closeReturnModal);
+  if (returnCancel) returnCancel.addEventListener("click", closeReturnModal);
+  if (returnModal) {
+    returnModal.addEventListener("click", (e) => {
+      if (e.target === returnModal) closeReturnModal();
+    });
+  }
+  if (returnForm) {
+    returnForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      returnError.style.display = "none";
+      const message = (returnMessage.value || "").trim();
+      if (!message) {
+        returnError.textContent = "Please explain what to fix.";
+        returnError.style.display = "block";
+        return;
+      }
+      try {
+        const res = await api(`/api/tasks/${taskCtx.task.id}/return`, {
+          method: "POST",
+          body: JSON.stringify({ message }),
+        });
+        taskCtx.task = (await res.json()).task;
+        closeReturnModal();
+        renderTaskHeader();
+        showToast("Returned to annotator.");
+      } catch (err) {
+        returnError.textContent = err.message || "Return failed.";
+        returnError.style.display = "block";
+      }
+    });
+  }
+}
+
+function openReturnModal() {
+  const m = document.getElementById("return-modal");
+  if (m) {
+    m.classList.remove("hidden");
+    document.getElementById("return-message").focus();
+  }
+}
+
+async function renderCommentsThread() {
+  const thread = document.getElementById("comments-thread");
+  if (!thread || !taskCtx.task) return;
+  thread.innerHTML = '<div class="comments-empty">Loading…</div>';
+  try {
+    const res = await api(`/api/tasks/${taskCtx.task.id}/events`);
+    const events = (await res.json()).events || [];
+    if (!events.length) {
+      thread.innerHTML = '<div class="comments-empty">No activity yet.</div>';
+      return;
+    }
+    thread.innerHTML = "";
+    for (const ev of events) {
+      const row = document.createElement("div");
+      const isComment = ev.event_type === "comment";
+      row.className = "comment-row" + (isComment ? "" : " event-row");
+      const head = document.createElement("div");
+      head.className = "comment-head";
+      const who = document.createElement("span");
+      who.className = "comment-author";
+      who.textContent = ev.actor_username || "system";
+      const when = document.createElement("span");
+      when.className = "comment-time";
+      when.textContent = formatEventTime(ev.created_at);
+      head.appendChild(who);
+      head.appendChild(when);
+      const body = document.createElement("div");
+      body.className = "comment-body";
+      body.textContent = isComment
+        ? (ev.message || "")
+        : `· ${ev.event_type}${ev.message ? ` — ${ev.message}` : ""}`;
+      row.appendChild(head);
+      row.appendChild(body);
+      thread.appendChild(row);
+    }
+    thread.scrollTop = thread.scrollHeight;
+  } catch (err) {
+    thread.innerHTML = `<div class="comments-empty">Failed to load: ${escapeHtml(err.message || "")}</div>`;
+  }
+}
+
+async function refreshCommentCount() {
+  if (!taskCtx.task) return;
+  const badge = document.getElementById("task-comment-count");
+  if (!badge) return;
+  try {
+    const res = await api(`/api/tasks/${taskCtx.task.id}/events`);
+    const events = (await res.json()).events || [];
+    const n = events.filter((e) => e.event_type === "comment").length;
+    badge.textContent = String(n);
+    badge.classList.toggle("zero", n === 0);
+  } catch { /* ignore */ }
+}
+
+function formatEventTime(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch { return iso; }
 }
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────

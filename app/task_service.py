@@ -346,6 +346,35 @@ def update_progress_counters(
     task.annotated_count = annotated
 
 
+def sync_progress_for_folder(
+    db: Session,
+    folder_path: str,
+    *,
+    total: int,
+    reviewed: int,
+    correct: int,
+    wrong: int,
+    annotated: int,
+) -> int:
+    """Push aggregated review counts into every non-deleted task that points at
+    this folder. Folder paths are not enforced unique, so this updates all
+    matching tasks. Returns the number of tasks touched."""
+    if not folder_path:
+        return 0
+    q = select(Task).where(
+        Task.folder_path == folder_path,
+        Task.deleted_at.is_(None),
+    )
+    tasks = list(db.scalars(q).all())
+    for task in tasks:
+        task.total_images = total
+        task.reviewed_count = reviewed
+        task.correct_count = correct
+        task.wrong_count = wrong
+        task.annotated_count = annotated
+    return len(tasks)
+
+
 # --- serialization ---
 
 def task_to_dict(task: Task) -> dict:

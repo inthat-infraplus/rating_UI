@@ -257,6 +257,60 @@
 
     </section>
 
+    <!-- ── Task action bar (role+status aware, populated by app.js) ─────────── -->
+    <section class="task-action-bar" id="task-action-bar" style="display:none">
+      <div class="task-action-info">
+        <div class="task-action-desc" id="task-action-desc"></div>
+        <div class="task-action-meta" id="task-action-meta"></div>
+      </div>
+      <div class="task-action-buttons" id="task-action-buttons"></div>
+      <button class="btn btn-outline-secondary btn-sm task-action-comments" id="task-comments-btn" type="button">
+        💬 Comments <span id="task-comment-count">0</span>
+      </button>
+    </section>
+
+    <!-- ── Comments modal ─────────────────────────────────────────────────── -->
+    <div class="modal-backdrop hidden" id="comments-modal">
+      <div class="modal-card comments-modal-card" role="dialog" aria-labelledby="comments-modal-title">
+        <header class="modal-head">
+          <h2 id="comments-modal-title">Comments</h2>
+          <button class="modal-close" id="comments-close" type="button" aria-label="Close">×</button>
+        </header>
+        <div class="comments-body">
+          <div class="comments-thread" id="comments-thread"></div>
+          <form id="comment-form" class="comment-form">
+            <textarea class="form-control" id="comment-input" rows="2"
+                      placeholder="Write a comment..." required></textarea>
+            <button class="btn btn-primary btn-sm" type="submit">Post</button>
+          </form>
+          <div class="modal-error" id="comments-error" style="display:none"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Return-with-message modal (L1) ─────────────────────────────────── -->
+    <div class="modal-backdrop hidden role-l1-only" id="return-modal">
+      <div class="modal-card" role="dialog" aria-labelledby="return-modal-title">
+        <header class="modal-head">
+          <h2 id="return-modal-title">Return to annotator</h2>
+          <button class="modal-close" id="return-close" type="button" aria-label="Close">×</button>
+        </header>
+        <form id="return-form" class="px-4 pb-3">
+          <p class="text-muted small mb-2">
+            Tell the annotator what to fix. They'll see this in the comments thread
+            and the task will move back to <em>returned</em>.
+          </p>
+          <textarea class="form-control" id="return-message" rows="3" required
+                    placeholder="e.g. Image #3 polygon is missing — please redo."></textarea>
+          <div class="modal-error" id="return-error" style="display:none"></div>
+          <footer class="modal-foot">
+            <button class="btn btn-outline-secondary" id="return-cancel" type="button">Cancel</button>
+            <button class="btn btn-warning" type="submit">Return task</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
     <!-- ── Review layout ─────────────────────────────────────────────────────── -->
     <section class="review-layout">
       <aside class="sidebar-panel">

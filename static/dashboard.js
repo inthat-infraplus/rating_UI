@@ -74,6 +74,27 @@ async function fetchJson(url, opts = {}) {
 
 // --- render ---
 
+function renderNavBadge() {
+  const badge = $("#nav-qc-badge");
+  if (!badge) return;
+  let count = 0;
+  let title = "";
+  if (IS_L1) {
+    count = allTasks.filter(t => ["submitted", "in_qc"].includes(t.status)).length;
+    title = `${count} task${count === 1 ? "" : "s"} waiting QC`;
+  } else {
+    count = allTasks.filter(t => t.status === "returned").length;
+    title = `${count} task${count === 1 ? "" : "s"} returned for fixes`;
+  }
+  if (count > 0) {
+    badge.textContent = String(count);
+    badge.title = title;
+    badge.style.display = "inline-block";
+  } else {
+    badge.style.display = "none";
+  }
+}
+
 function renderRoleVisibility() {
   // Hide L1-only elements for L2.
   $$(".role-l1-only").forEach((el) => {
@@ -342,6 +363,7 @@ async function loadTasks() {
         : `${tasks.length} task${tasks.length === 1 ? "" : "s"} in your queue.`;
     renderFilters();
     renderGrid();
+    renderNavBadge();
   } catch (err) {
     if (err.status === 401) {
       window.location.href = "/login";

@@ -277,6 +277,7 @@ async def update_review(request: ReviewUpdateRequest) -> JSONResponse:
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _sync_task_progress(request.folder_path, session)
     return JSONResponse(content={"session": to_payload_dict(session)})
 
 
@@ -413,6 +414,7 @@ async def update_annotations(request: ImageAnnotationUpdateRequest) -> JSONRespo
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _sync_task_progress(request.folder_path, session)
     return JSONResponse(content={"session": to_payload_dict(session)})
 
 
@@ -501,6 +503,28 @@ async def export_updated_csv(request: FolderRequest) -> FileResponse:
 
 def _http_from_service_error(exc: task_service.TaskServiceError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+def _sync_task_progress(folder_path: str, session) -> None:
+    """Push the latest review summary into any task pointing at this folder.
+
+    Called fire-and-forget after /api/review and /api/annotations so the
+    dashboard cards reflect L2's live progress without polling. Failures are
+    swallowed — the review action itself already succeeded."""
+    try:
+        summary = session.summary
+        with db_session() as db:
+            task_service.sync_progress_for_folder(
+                db,
+                folder_path,
+                total=summary.total_count,
+                reviewed=summary.reviewed_count,
+                correct=summary.correct_count,
+                wrong=summary.selected_count,
+                annotated=summary.annotated_count,
+            )
+    except Exception:
+        pass
 
 
 @app.get("/api/tasks")
