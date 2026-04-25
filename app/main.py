@@ -6,11 +6,22 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
+from starlette.middleware.sessions import SessionMiddleware
 
+from .auth import (
+    authenticate,
+    current_user,
+    get_secret_key,
+    login_user,
+    logout_user,
+    require_user,
+)
+from .db import init_db
+from .models_db import User
 from .models import (
     AreaCalculationRequest,
     CsvLinkRequest,
@@ -33,8 +44,25 @@ from .review_store import (
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 app = FastAPI(title="Rating UI", version="1.0.0")
+
+# Session cookie (signed via itsdangerous). Must come before routes that use request.session.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=get_secret_key(),
+    session_cookie="rating_ui_session",
+    same_site="lax",
+    https_only=False,  # local-first; flip to True behind HTTPS proxy
+    max_age=60 * 60 * 24 * 7,  # 7 days
+)
+
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    """Create DB tables on first run. Idempotent."""
+    init_db()
 
 
 def open_folder_dialog() -> str | None:
@@ -66,13 +94,71 @@ def safe_folder_name(name: str) -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "index.html", context={})
+async def index(request: Request):
+    # Phase 1: gate the main UI behind login. Anonymous → /login.
+    user = current_user(request)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse(
+        request, "index.html", context={"current_user": user},
+    )
 
 
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# --- Auth routes ---
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: str = "/"):
+    # If already logged in, bounce to next (default /).
+    if current_user(request) is not None:
+        return RedirectResponse(url=next or "/", status_code=302)
+    return templates.TemplateResponse(
+        request, "login.html", context={"error": None, "next": next, "username": ""},
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+):
+    user = await run_in_threadpool(authenticate, username, password)
+    if user is None:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            context={"error": "Invalid username or password.", "next": next, "username": username},
+            status_code=401,
+        )
+    login_user(request, user)
+    # Prevent open-redirect: only allow same-origin relative paths.
+    target = next if (next or "").startswith("/") else "/"
+    return RedirectResponse(url=target, status_code=302)
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    logout_user(request)
+    return RedirectResponse(url="/login", status_code=302)
+
+
+@app.get("/api/me")
+async def me(request: Request) -> JSONResponse:
+    user: User = require_user(request)
+    return JSONResponse(
+        content={
+            "id": user.id,
+            "username": user.username,
+            "display_name": user.display_name,
+            "role": user.role.value,
+        }
+    )
 
 
 @app.post("/api/select-folder")

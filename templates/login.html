@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — Rating UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap.min.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <div class="login-card">
+      <p class="eyebrow mb-2">Rating UI</p>
+      <h1 class="login-title mb-1">Sign in</h1>
+      <p class="login-subtitle mb-4">Use your team account to continue.</p>
+
+      {% if error %}
+      <div class="login-alert" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/login" autocomplete="on" novalidate>
+        <input type="hidden" name="next" value="{{ next | default('/') }}" />
+
+        <label class="login-label" for="username">Username</label>
+        <input
+          class="form-control form-control-lg login-input"
+          id="username" name="username" type="text" required
+          value="{{ username | default('') }}"
+          autocomplete="username" autofocus />
+
+        <label class="login-label mt-3" for="password">Password</label>
+        <input
+          class="form-control form-control-lg login-input"
+          id="password" name="password" type="password" required
+          autocomplete="current-password" />
+
+        <button class="btn btn-primary btn-lg w-100 mt-4" type="submit">Sign in</button>
+      </form>
+
+      <p class="login-foot mt-4 mb-0">
+        No account? Ask your Assigner/Reviewer (L1) to create one.
+      </p>
+    </div>
+  </main>
+</body>
+</html>

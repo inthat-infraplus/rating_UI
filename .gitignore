@@ -8,4 +8,9 @@ build/
 *.egg
 *.log
 
+# SQLite DBs (created at runtime, not for git)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 
