@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Users — Rating UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap.min.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+</head>
+<body class="dashboard-body admin-body">
+
+  <!-- Top nav -->
+  <nav class="app-nav">
+    <div class="app-nav-inner">
+      <div class="app-nav-brand">
+        <a href="/" class="back-to-dashboard" title="Back to tasks">←</a>
+        <span class="brand-mark">●</span>
+        <span class="brand-title">Rating UI · Users</span>
+      </div>
+      <div class="app-nav-user">
+        <span class="nav-user-name">{{ current_user.display_name or current_user.username }}</span>
+        <span class="nav-user-role role-{{ current_user.role.value | lower }}">{{ current_user.role.value }}</span>
+        <form method="post" action="/logout" class="d-inline-block ms-2">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Sign out</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <main class="dashboard-shell container-fluid py-4">
+
+    <header class="dashboard-head">
+      <div>
+        <p class="eyebrow mb-2">Administration</p>
+        <h1 class="mb-1">Users</h1>
+        <p class="dashboard-subtitle mb-0" id="users-subtitle">Loading…</p>
+      </div>
+      <div class="dashboard-head-actions">
+        <button class="btn btn-primary btn-lg" id="new-user-btn" type="button">
+          + New user
+        </button>
+      </div>
+    </header>
+
+    <section class="users-table-wrap">
+      <table class="users-table" id="users-table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Display name</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Last login</th>
+            <th class="users-table-actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <!-- New-user modal -->
+  <div class="modal-backdrop hidden" id="new-user-modal">
+    <div class="modal-card" role="dialog" aria-labelledby="new-user-title">
+      <header class="modal-head">
+        <h2 id="new-user-title">Create user</h2>
+        <button class="modal-close" id="new-user-close" type="button" aria-label="Close">×</button>
+      </header>
+      <form id="new-user-form" novalidate>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="nu-username">Username <span class="req">*</span></label>
+            <input class="form-control" id="nu-username" name="username" required minlength="2" maxlength="64" autocomplete="off" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nu-display">Display name</label>
+            <input class="form-control" id="nu-display" name="display_name" maxlength="128" autocomplete="off" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="nu-password">Password <span class="req">*</span></label>
+            <input class="form-control" id="nu-password" name="password" type="password" required minlength="6" autocomplete="new-password" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nu-role">Role <span class="req">*</span></label>
+            <select class="form-select" id="nu-role" name="role" required>
+              <option value="L2">L2 — Annotator</option>
+              <option value="L1">L1 — Reviewer / Assigner</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-error" id="new-user-error" style="display:none"></div>
+
+        <footer class="modal-foot">
+          <button class="btn btn-outline-secondary" id="new-user-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="new-user-submit" type="submit">Create user</button>
+        </footer>
+      </form>
+    </div>
+  </div>
+
+  <!-- Reset-password modal -->
+  <div class="modal-backdrop hidden" id="reset-pw-modal">
+    <div class="modal-card" role="dialog" aria-labelledby="reset-pw-title">
+      <header class="modal-head">
+        <h2 id="reset-pw-title">Reset password</h2>
+        <button class="modal-close" id="reset-pw-close" type="button" aria-label="Close">×</button>
+      </header>
+      <form id="reset-pw-form" novalidate>
+        <p class="modal-help">
+          Set a new password for <strong id="reset-pw-username">—</strong>.
+          They'll need this to sign in next time.
+        </p>
+        <div class="form-group">
+          <label class="form-label" for="rp-password">New password <span class="req">*</span></label>
+          <input class="form-control" id="rp-password" name="new_password" type="password" required minlength="6" autocomplete="new-password" />
+        </div>
+        <div class="modal-error" id="reset-pw-error" style="display:none"></div>
+        <footer class="modal-foot">
+          <button class="btn btn-outline-secondary" id="reset-pw-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="reset-pw-submit" type="submit">Update password</button>
+        </footer>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast-wrap"><div class="app-toast" id="toast"></div></div>
+
+  <!-- Bootstrap data for JS -->
+  <script id="bootstrap-data" type="application/json">
+    {
+      "user": {
+        "id": {{ current_user.id }},
+        "username": "{{ current_user.username }}",
+        "display_name": "{{ current_user.display_name }}",
+        "role": "{{ current_user.role.value }}"
+      }
+    }
+  </script>
+  <script src="{{ url_for('static', path='admin_users.js') }}"></script>
+</body>
+</html>

@@ -18,6 +18,9 @@
       </div>
       <div class="app-nav-user" id="nav-user">
         <span class="nav-qc-badge" id="nav-qc-badge" style="display:none" title="Action needed"></span>
+        {% if current_user.role.value == "L1" %}
+        <a href="/admin/users" class="nav-admin-link role-l1-only" title="Manage users">⚙ Users</a>
+        {% endif %}
         <span class="nav-user-name" id="nav-user-name">{{ current_user.display_name or current_user.username }}</span>
         <span class="nav-user-role role-{{ current_user.role.value | lower }}">{{ current_user.role.value }}</span>
         <form method="post" action="/logout" class="d-inline-block ms-2">

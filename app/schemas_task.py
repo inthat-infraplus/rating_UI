@@ -27,6 +27,17 @@ class UserCreate(BaseModel):
     role: UserRole
 
 
+class UserPatch(BaseModel):
+    """L1-only partial update of a user (role, display_name, active flag)."""
+    display_name: str | None = Field(default=None, max_length=128)
+    role: UserRole | None = None
+    is_active: bool | None = None
+
+
+class PasswordReset(BaseModel):
+    new_password: str = Field(..., min_length=6)
+
+
 class MeOut(BaseModel):
     id: int
     username: str

@@ -1637,3 +1637,171 @@ body.task-detail-body .task-legacy-hide {
   }
 }
 
+/* ── Nav: admin link ─────────────────────────────────────────────────────── */
+.nav-admin-link {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #2c4452;
+  text-decoration: none;
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.nav-admin-link:hover {
+  background: #18313f;
+  color: #fff;
+  border-color: #18313f;
+}
+
+/* ── Admin: users page ───────────────────────────────────────────────────── */
+.admin-body .back-to-dashboard {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  margin-right: 0.4rem;
+  border-radius: 8px;
+  background: rgba(7, 59, 76, 0.06);
+  color: #18313f;
+  text-decoration: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: background 120ms;
+}
+
+.admin-body .back-to-dashboard:hover {
+  background: rgba(7, 59, 76, 0.14);
+}
+
+.users-table-wrap {
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 22px rgba(7, 59, 76, 0.06);
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.users-table thead th {
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(238, 242, 246, 0.6);
+}
+
+.users-table tbody td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.users-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.users-table tbody tr:hover {
+  background: rgba(11, 110, 79, 0.04);
+}
+
+.user-row-inactive td {
+  color: var(--muted);
+  background: rgba(99, 113, 130, 0.05);
+}
+
+.user-row-inactive .user-username {
+  text-decoration: line-through;
+  text-decoration-color: rgba(99, 113, 130, 0.5);
+}
+
+.user-username {
+  font-weight: 600;
+  color: #0c2c39;
+}
+
+.user-self-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+}
+
+.user-status-pill {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.user-status-pill.active {
+  background: var(--success-soft);
+  color: var(--accent-strong);
+}
+
+.user-status-pill.inactive {
+  background: rgba(99, 113, 130, 0.12);
+  color: var(--muted);
+}
+
+.user-last-login {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.user-role-select {
+  max-width: 5.5rem;
+  font-size: 0.85rem;
+}
+
+.users-table-actions-col {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.user-actions {
+  display: flex;
+  gap: 0.45rem;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.users-empty {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.modal-help {
+  padding: 0 0 0.75rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.modal-help strong {
+  color: #0c2c39;
+}
+

@@ -193,17 +193,19 @@ static/
 
 ## 8. Phased rollout
 
-| Phase | Scope | Est. |
-|---|---|---|
-| P1 | DB + auth + seed CLI + `/login` | 0.5d |
-| P2 | Task CRUD API + permission guards | 1d |
-| P3 | Dashboard landing page (cards) | 1d |
-| P4 | Refactor review UI → task detail (role-gate + hide L2 exports) | 1d |
-| P5 | Submit/QC workflow + comments + notification badge | 0.5d |
-| P6 | Admin user page + polish + docs update | 0.5d |
-| **Total** | | **~4.5d** |
+| Phase | Scope | Est. | Status |
+|---|---|---|---|
+| P1 | DB + auth + seed CLI + `/login` | 0.5d | ✅ done |
+| P2 | Task CRUD API + permission guards | 1d | ✅ done (`_smoke_p2.py`) |
+| P3 | Dashboard landing page (cards) | 1d | ✅ done |
+| P4 | Refactor review UI → task detail (role-gate + hide L2 exports) | 1d | ✅ done |
+| P5 | Submit/QC workflow + comments + notification badge | 0.5d | ✅ done — counter sync via `task_service.sync_progress_for_folder` |
+| P6 | Admin user page + polish + docs update | 0.5d | ✅ done (`_smoke_p6.py`) |
+| **Total** | | **~4.5d** | **All phases shipped on `infallible-gould` worktree.** |
 
 Each phase ends testable end-to-end. Build on a feature branch; single merge when all phases pass.
+
+**Smoke tests at repo root**: `_smoke_p2.py` (task CRUD + RBAC + state machine), `_smoke_p6.py` (admin user endpoints + self-lockout). Run with `python _smoke_pN.py` after the dev server's seed users (`admin/adminpass`, `alice/alicepass`, `bob/bobpass`) are present.
 
 ---
 

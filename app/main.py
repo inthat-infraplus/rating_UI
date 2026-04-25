@@ -29,10 +29,12 @@ from .models_db import User, UserRole
 from .schemas_task import (
     AssignRequest,
     CommentRequest,
+    PasswordReset,
     ReturnRequest,
     TaskCreate,
     TaskUpdate,
     UserCreate,
+    UserPatch,
 )
 from .models import (
     AreaCalculationRequest,
@@ -769,5 +771,100 @@ async def api_create_user(request: Request, payload: UserCreate) -> JSONResponse
             "username": new_user.username,
             "display_name": new_user.display_name,
             "role": new_user.role.value,
+            "is_active": new_user.is_active,
         }
     return JSONResponse(content={"user": data}, status_code=201)
+
+
+@app.get("/api/admin/users")
+async def api_list_all_users(request: Request) -> JSONResponse:
+    """L1 admin listing — includes inactive users + last_login_at."""
+    user = require_user(request)
+    if user.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden — L1 only.")
+    with db_session() as db:
+        users = db.scalars(select(User).order_by(User.username)).all()
+        payload = [
+            {
+                "id": u.id,
+                "username": u.username,
+                "display_name": u.display_name,
+                "role": u.role.value,
+                "is_active": u.is_active,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            }
+            for u in users
+        ]
+    return JSONResponse(content={"users": payload})
+
+
+@app.patch("/api/admin/users/{user_id}")
+async def api_update_user(
+    user_id: int, request: Request, payload: UserPatch
+) -> JSONResponse:
+    """L1 only — change role / display_name / active flag. Cannot demote
+    yourself out of L1 (lockout protection)."""
+    actor = require_user(request)
+    if actor.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden — L1 only.")
+    with db_session() as db:
+        target = db.get(User, user_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        fields = payload.model_dump(exclude_unset=True)
+
+        # Self-protection: don't let an L1 lock themselves out.
+        if user_id == actor.id:
+            if fields.get("role") and fields["role"] != UserRole.L1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="You cannot demote yourself from L1.",
+                )
+            if fields.get("is_active") is False:
+                raise HTTPException(
+                    status_code=400,
+                    detail="You cannot deactivate your own account.",
+                )
+
+        for key, value in fields.items():
+            setattr(target, key, value)
+
+        data = {
+            "id": target.id,
+            "username": target.username,
+            "display_name": target.display_name,
+            "role": target.role.value,
+            "is_active": target.is_active,
+        }
+    return JSONResponse(content={"user": data})
+
+
+@app.post("/api/admin/users/{user_id}/reset-password")
+async def api_reset_password(
+    user_id: int, request: Request, payload: PasswordReset
+) -> JSONResponse:
+    """L1 only — reset another user's password to a new value."""
+    actor = require_user(request)
+    if actor.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden — L1 only.")
+    with db_session() as db:
+        target = db.get(User, user_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        target.password_hash = hash_password(payload.new_password)
+    return JSONResponse(content={"ok": True})
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page(request: Request):
+    """L1-only admin page rendering admin_users.html."""
+    user = current_user(request)
+    if user is None:
+        return RedirectResponse(url="/login?next=/admin/users", status_code=302)
+    if user.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden — L1 only.")
+    return templates.TemplateResponse(
+        request, "admin_users.html", context={"current_user": user},
+    )

@@ -1444,7 +1444,10 @@ function renderTaskHeader() {
       const res = await api(`/api/tasks/${task.id}/submit`, { method: "POST", body: "{}" });
       taskCtx.task = (await res.json()).task;
       renderTaskHeader();
-      showToast("Submitted for QC.");
+      showToast("Submitted for QC. Returning to dashboard…");
+      // After submit, L2 has no more actions on this task — bounce to dashboard
+      // so they see the updated grid + pick up their next assignment.
+      setTimeout(() => { window.location.href = "/"; }, 900);
     }));
   }
 
@@ -1454,7 +1457,9 @@ function renderTaskHeader() {
       const res = await api(`/api/tasks/${task.id}/approve`, { method: "POST", body: "{}" });
       taskCtx.task = (await res.json()).task;
       renderTaskHeader();
-      showToast("Approved.");
+      showToast("Approved. Returning to dashboard…");
+      // L1 can now export from dashboard; bounce back so they see the queue clear.
+      setTimeout(() => { window.location.href = "/"; }, 900);
     }));
     btns.appendChild(makeActionBtn("Return with comment", "btn-warning", () => openReturnModal()));
   }
@@ -1561,7 +1566,8 @@ function wireTaskActions() {
         taskCtx.task = (await res.json()).task;
         closeReturnModal();
         renderTaskHeader();
-        showToast("Returned to annotator.");
+        showToast("Returned to annotator. Returning to dashboard…");
+        setTimeout(() => { window.location.href = "/"; }, 900);
       } catch (err) {
         returnError.textContent = err.message || "Return failed.";
         returnError.style.display = "block";

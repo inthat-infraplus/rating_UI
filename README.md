@@ -2,6 +2,48 @@
 
 Local web app for reviewing model prediction images on Windows. Reviewers mark images where the model predicted incorrectly, and the app exports the selected images as a `.zip` package with both `manifest.json` and `manifest.csv` for the training team.
 
+## Multi-user mode (v2)
+
+The app now supports a task-based, role-based workflow:
+
+- **L1 (Reviewer / Assigner)** — creates tasks, assigns them to L2 annotators, runs QC, returns or approves submissions, and exports approved task ZIPs. L1 also manages users at `/admin/users`.
+- **L2 (Annotator)** — sees tasks assigned to them on the dashboard, opens one to review images, submits for QC when finished, and fixes any returned tasks.
+
+Task lifecycle: `draft → assigned → in_progress → submitted → in_qc ↔ returned → approved → exported`.
+
+### First-time setup
+
+```powershell
+# 1. create the SQLite DB
+python -m app.cli init-db
+
+# 2. create the first L1 admin (prompts for password)
+python -m app.cli create-user --username admin --role L1 --display-name "Admin"
+
+# 3. (optional) seed an L2 annotator
+python -m app.cli create-user --username alice --role L2 --display-name "Alice"
+```
+
+Then run the app and sign in at `/login`:
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+Subsequent users can be created from the L1 admin page at `/admin/users` (the **⚙ Users** link in the top nav).
+
+### Setting the session secret
+
+For production / shared deployments, set a stable cookie-signing key so sessions survive restarts:
+
+```powershell
+$env:RATING_UI_SECRET_KEY = "<long random string>"
+```
+
+If the env var is missing, the app warns at startup and uses an insecure dev key.
+
+
+
 ## Stack
 
 - Backend: `FastAPI`
