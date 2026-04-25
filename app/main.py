@@ -12,16 +12,28 @@ from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
+from sqlalchemy import select
+
+from . import task_service
 from .auth import (
     authenticate,
     current_user,
     get_secret_key,
+    hash_password,
     login_user,
     logout_user,
     require_user,
 )
-from .db import init_db
-from .models_db import User
+from .db import db_session, init_db
+from .models_db import User, UserRole
+from .schemas_task import (
+    AssignRequest,
+    CommentRequest,
+    ReturnRequest,
+    TaskCreate,
+    TaskUpdate,
+    UserCreate,
+)
 from .models import (
     AreaCalculationRequest,
     CsvLinkRequest,
@@ -467,3 +479,242 @@ async def export_updated_csv(request: FolderRequest) -> FileResponse:
         filename=export_name,
         background=BackgroundTask(lambda path=export_path: path.unlink(missing_ok=True)),
     )
+
+
+# ─── Phase 2: Task management endpoints ────────────────────────────────────
+#
+# Permission rules live in app/task_service.py — endpoints just translate
+# HTTP into service calls and map service errors onto HTTP status codes.
+
+def _http_from_service_error(exc: task_service.TaskServiceError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@app.get("/api/tasks")
+async def api_list_tasks(request: Request) -> JSONResponse:
+    user = require_user(request)
+    with db_session() as db:
+        # Re-attach user to this session so relationship loads work
+        db_user = db.get(User, user.id)
+        tasks = task_service.list_tasks_for_user(db, db_user)
+        payload = [task_service.task_to_dict(t) for t in tasks]
+    return JSONResponse(content={"tasks": payload})
+
+
+@app.post("/api/tasks")
+async def api_create_task(request: Request, payload: TaskCreate) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.create_task(db, db_user, payload)
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data}, status_code=201)
+
+
+@app.get("/api/tasks/{task_id}")
+async def api_get_task(task_id: int, request: Request) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.get_task(db, task_id)
+            task_service._require_view(task, db_user)
+            data = task_service.task_to_dict(task)
+            events = [task_service.event_to_dict(e) for e in task.events]
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data, "events": events})
+
+
+@app.patch("/api/tasks/{task_id}")
+async def api_update_task(task_id: int, request: Request, payload: TaskUpdate) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.update_task(db, db_user, task_id, payload)
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data})
+
+
+@app.delete("/api/tasks/{task_id}")
+async def api_delete_task(task_id: int, request: Request) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task_service.soft_delete_task(db, db_user, task_id)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"ok": True})
+
+
+@app.post("/api/tasks/{task_id}/assign")
+async def api_assign_task(
+    task_id: int, request: Request, payload: AssignRequest
+) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.assign_task(db, db_user, task_id, payload.assigned_to)
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data})
+
+
+@app.post("/api/tasks/{task_id}/submit")
+async def api_submit_task(task_id: int, request: Request) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.submit_for_qc(db, db_user, task_id)
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data})
+
+
+@app.post("/api/tasks/{task_id}/return")
+async def api_return_task(
+    task_id: int, request: Request, payload: ReturnRequest
+) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.return_to_annotator(
+                db, db_user, task_id, payload.message,
+            )
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data})
+
+
+@app.post("/api/tasks/{task_id}/approve")
+async def api_approve_task(task_id: int, request: Request) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.approve_task(db, db_user, task_id)
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data})
+
+
+@app.post("/api/tasks/{task_id}/qc-open")
+async def api_open_qc(task_id: int, request: Request) -> JSONResponse:
+    """Optional helper L1 calls when opening a submitted task — flips SUBMITTED→IN_QC."""
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.open_qc(db, db_user, task_id)
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data})
+
+
+@app.get("/api/tasks/{task_id}/events")
+async def api_list_events(task_id: int, request: Request) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            events = task_service.list_events(db, db_user, task_id)
+            data = [task_service.event_to_dict(e) for e in events]
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"events": data})
+
+
+@app.post("/api/tasks/{task_id}/events")
+async def api_add_comment(
+    task_id: int, request: Request, payload: CommentRequest
+) -> JSONResponse:
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            event = task_service.add_comment(db, db_user, task_id, payload.message)
+            db.flush()
+            data = task_service.event_to_dict(event)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"event": data}, status_code=201)
+
+
+# ─── User management (L1 only) ─────────────────────────────────────────────
+
+@app.get("/api/users")
+async def api_list_users(request: Request) -> JSONResponse:
+    """Used to populate the assignee dropdown — L1 only, returns active L2 users
+    by default. L1 can also pass ?role=L1 to list reviewers."""
+    user = require_user(request)
+    if user.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden — L1 only.")
+    role_filter = request.query_params.get("role")
+    with db_session() as db:
+        q = select(User).where(User.is_active.is_(True))
+        if role_filter in {"L1", "L2"}:
+            q = q.where(User.role == UserRole(role_filter))
+        users = db.scalars(q.order_by(User.username)).all()
+        payload = [
+            {
+                "id": u.id,
+                "username": u.username,
+                "display_name": u.display_name,
+                "role": u.role.value,
+            }
+            for u in users
+        ]
+    return JSONResponse(content={"users": payload})
+
+
+@app.post("/api/admin/users")
+async def api_create_user(request: Request, payload: UserCreate) -> JSONResponse:
+    user = require_user(request)
+    if user.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden — L1 only.")
+    with db_session() as db:
+        existing = db.scalars(
+            select(User).where(User.username == payload.username)
+        ).first()
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Username {payload.username!r} is already taken.",
+            )
+        new_user = User(
+            username=payload.username,
+            password_hash=hash_password(payload.password),
+            display_name=payload.display_name or payload.username,
+            role=payload.role,
+        )
+        db.add(new_user)
+        db.flush()
+        data = {
+            "id": new_user.id,
+            "username": new_user.username,
+            "display_name": new_user.display_name,
+            "role": new_user.role.value,
+        }
+    return JSONResponse(content={"user": data}, status_code=201)
