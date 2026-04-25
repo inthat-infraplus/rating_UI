@@ -107,12 +107,25 @@ def safe_folder_name(name: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    # Phase 1: gate the main UI behind login. Anonymous → /login.
+    """Landing page = task dashboard. Anonymous → /login."""
     user = current_user(request)
     if user is None:
         return RedirectResponse(url="/login", status_code=302)
     return templates.TemplateResponse(
-        request, "index.html", context={"current_user": user},
+        request, "dashboard.html", context={"current_user": user},
+    )
+
+
+@app.get("/tasks/{task_id}", response_class=HTMLResponse)
+async def task_detail_page(task_id: int, request: Request):
+    """Task detail = the review UI. Phase 4 will pass task_id into the JS to
+    scope review_store; for now it just renders the same UI behind auth."""
+    user = current_user(request)
+    if user is None:
+        return RedirectResponse(url=f"/login?next=/tasks/{task_id}", status_code=302)
+    return templates.TemplateResponse(
+        request, "index.html",
+        context={"current_user": user, "task_id": task_id},
     )
 
 

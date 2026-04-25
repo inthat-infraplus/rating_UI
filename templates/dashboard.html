@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tasks — Rating UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap.min.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+</head>
+<body class="dashboard-body">
+
+  <!-- Top nav -->
+  <nav class="app-nav">
+    <div class="app-nav-inner">
+      <div class="app-nav-brand">
+        <span class="brand-mark">●</span>
+        <span class="brand-title">Rating UI</span>
+      </div>
+      <div class="app-nav-user" id="nav-user">
+        <span class="nav-user-name" id="nav-user-name">{{ current_user.display_name or current_user.username }}</span>
+        <span class="nav-user-role role-{{ current_user.role.value | lower }}">{{ current_user.role.value }}</span>
+        <form method="post" action="/logout" class="d-inline-block ms-2">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Sign out</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <main class="dashboard-shell container-fluid py-4">
+
+    <header class="dashboard-head">
+      <div>
+        <p class="eyebrow mb-2">Workspace</p>
+        <h1 class="mb-1">Tasks</h1>
+        <p class="dashboard-subtitle mb-0" id="dashboard-subtitle">Loading…</p>
+      </div>
+      <div class="dashboard-head-actions">
+        <button class="btn btn-primary btn-lg role-l1-only" id="new-task-btn" type="button">
+          + New Task
+        </button>
+      </div>
+    </header>
+
+    <!-- Filter chips -->
+    <div class="filter-bar" id="filter-bar"></div>
+
+    <!-- Card grid -->
+    <section class="task-grid" id="task-grid"></section>
+
+    <!-- Empty state -->
+    <div class="task-empty" id="task-empty" style="display:none">
+      <div class="task-empty-icon">📋</div>
+      <h3>No tasks here</h3>
+      <p id="task-empty-text">Switch a filter, or ask your reviewer to assign one.</p>
+    </div>
+
+  </main>
+
+  <!-- New-task modal (L1 only) -->
+  <div class="modal-backdrop hidden" id="new-task-modal">
+    <div class="modal-card" role="dialog" aria-labelledby="new-task-title">
+      <header class="modal-head">
+        <h2 id="new-task-title">Create task</h2>
+        <button class="modal-close" id="new-task-close" type="button" aria-label="Close">×</button>
+      </header>
+      <form id="new-task-form" novalidate>
+        <div class="form-group">
+          <label class="form-label" for="nt-title">Title <span class="req">*</span></label>
+          <input class="form-control" id="nt-title" name="title" required maxlength="255" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="nt-description">Description</label>
+          <textarea class="form-control" id="nt-description" name="description" rows="2"></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="nt-folder">Image folder path</label>
+            <input class="form-control" id="nt-folder" name="folder_path"
+                   placeholder="C:/data/predictions/20250509" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nt-target">Target image folder (for ZIP export)</label>
+            <input class="form-control" id="nt-target" name="target_folder_path"
+                   placeholder="C:/data/originals/20250509" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="nt-csv">Results CSV path (optional)</label>
+            <input class="form-control" id="nt-csv" name="csv_path"
+                   placeholder="C:/data/detailed_results.csv" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nt-scale">Scale profile path (optional)</label>
+            <input class="form-control" id="nt-scale" name="scale_profile_path"
+                   placeholder="C:/data/scale_profile.csv" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="nt-assignee">Assign to</label>
+            <select class="form-select" id="nt-assignee" name="assigned_to">
+              <option value="">(unassigned — keep as draft)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="nt-due">Due date</label>
+            <input class="form-control" id="nt-due" name="due_date" type="date" />
+          </div>
+        </div>
+
+        <div class="modal-error" id="new-task-error" style="display:none"></div>
+
+        <footer class="modal-foot">
+          <button class="btn btn-outline-secondary" id="new-task-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="new-task-submit" type="submit">Create task</button>
+        </footer>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast-wrap"><div class="app-toast" id="toast"></div></div>
+
+  <!-- Bootstrap data for JS -->
+  <script id="bootstrap-data" type="application/json">
+    {
+      "user": {
+        "id": {{ current_user.id }},
+        "username": "{{ current_user.username }}",
+        "display_name": "{{ current_user.display_name }}",
+        "role": "{{ current_user.role.value }}"
+      }
+    }
+  </script>
+  <script src="{{ url_for('static', path='dashboard.js') }}"></script>
+</body>
+</html>
