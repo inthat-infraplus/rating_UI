@@ -1342,12 +1342,80 @@ window.addEventListener("keydown", async (event) => {
   }
 });
 
+// ── Task-detail mode init ────────────────────────────────────────────────────
+// When the page is rendered as /tasks/{id}, an inline script in index.html
+// stashes {task_id, user} on window.__rating_ui_task. We fetch the task,
+// flip ASSIGNED→IN_PROGRESS for L2 assignees, and auto-load its paths.
+async function initFromTask(taskInfo) {
+  const navTitle = document.getElementById("task-nav-title");
+  const navStatus = document.getElementById("task-nav-status");
+
+  let task;
+  try {
+    const res = await api(`/api/tasks/${taskInfo.task_id}`);
+    task = (await res.json()).task;
+  } catch (err) {
+    if (navTitle) navTitle.textContent = "Task not found";
+    showToast(err.message || "Task fetch failed.");
+    return;
+  }
+
+  if (navTitle) navTitle.textContent = task.title || `Task #${task.id}`;
+  if (navStatus) {
+    navStatus.textContent = (task.status || "").replace("_", " ");
+    navStatus.className = `status-pill status-${task.status}`;
+    navStatus.style.display = "inline-flex";
+  }
+
+  // Mark started — best-effort, ignores for L1 viewers + no-ops if already in progress.
+  try {
+    await api(`/api/tasks/${task.id}/start`, { method: "POST", body: "{}" });
+  } catch { /* non-fatal */ }
+
+  if (!task.folder_path) {
+    showToast("This task has no image folder yet — ask the reviewer to set one.");
+    return;
+  }
+
+  try {
+    await loadFolder(task.folder_path);
+  } catch (err) {
+    showToast(`Could not load folder: ${err.message}`);
+    return;
+  }
+
+  // Optional links — failures show a toast but don't block reviewing.
+  if (task.csv_path) {
+    try { await linkCsvByPath(task.csv_path); }
+    catch (err) { showToast(`CSV link failed: ${err.message}`); }
+  }
+
+  if (task.scale_profile_path) {
+    try { await linkScaleProfile(task.scale_profile_path); }
+    catch (err) { showToast(`Scale profile link failed: ${err.message}`); }
+  }
+
+  if (task.target_folder_path) {
+    targetFolderPathInput.value = task.target_folder_path;
+    try { await saveTargetFolderPath(); }
+    catch (err) { showToast(`Target folder failed: ${err.message}`); }
+  }
+}
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 (async function bootstrap() {
   // Annotation canvas: pointer-events off until draw mode activated
   annotationCanvas.style.pointerEvents = "none";
   imageCanvasWrap.style.display = "none";
 
+  // Task-detail mode (preferred): the page was rendered as /tasks/{id}.
+  if (window.__rating_ui_task && window.__rating_ui_task.task_id) {
+    try { await initFromTask(window.__rating_ui_task); }
+    catch (err) { showToast(err.message || "Task init failed."); }
+    return;
+  }
+
+  // Legacy standalone fallback (kept for any direct hits to / before P4).
   const savedFolder = localStorage.getItem("rating-ui:last-folder");
   if (!savedFolder) { render(); return; }
 

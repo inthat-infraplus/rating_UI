@@ -646,6 +646,22 @@ async def api_open_qc(task_id: int, request: Request) -> JSONResponse:
     return JSONResponse(content={"task": data})
 
 
+@app.post("/api/tasks/{task_id}/start")
+async def api_start_task(task_id: int, request: Request) -> JSONResponse:
+    """Called when a user opens a task. For an L2 assignee this flips
+    ASSIGNED→IN_PROGRESS (or RETURNED→IN_PROGRESS on resume). Idempotent for L1."""
+    user = require_user(request)
+    try:
+        with db_session() as db:
+            db_user = db.get(User, user.id)
+            task = task_service.mark_started(db, db_user, task_id)
+            db.flush()
+            data = task_service.task_to_dict(task)
+    except task_service.TaskServiceError as exc:
+        raise _http_from_service_error(exc) from exc
+    return JSONResponse(content={"task": data})
+
+
 @app.get("/api/tasks/{task_id}/events")
 async def api_list_events(task_id: int, request: Request) -> JSONResponse:
     user = require_user(request)

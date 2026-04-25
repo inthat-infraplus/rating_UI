@@ -1313,6 +1313,46 @@ kbd {
   display: none !important;
 }
 
+/* Task-detail page: hide L1-only chrome for L2 viewers */
+body.task-role-l2 .role-l1-only {
+  display: none !important;
+}
+
+/* Hide legacy hero/workflow panels in task-detail mode (paths come from task) */
+body.task-detail-body .task-legacy-hide {
+  display: none !important;
+}
+
+/* Top-nav extras for task-detail */
+.back-to-dashboard {
+  font-size: 1.3rem;
+  text-decoration: none;
+  color: var(--muted);
+  padding: 0 0.4rem;
+  border-radius: 8px;
+  line-height: 1;
+}
+
+.back-to-dashboard:hover {
+  background: #eef3f7;
+  color: #18313f;
+}
+
+.task-nav-title {
+  font-weight: 600;
+  color: #2c4452;
+  font-size: 0.95rem;
+  margin-left: 0.6rem;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#task-nav-status {
+  margin-left: 0.5rem;
+}
+
 /* ── Modal ───────────────────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;

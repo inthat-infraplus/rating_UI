@@ -7,11 +7,54 @@
   <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap.min.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
 </head>
-<body>
+<body class="task-detail-body">
+
+  <!-- Top nav (mirrors dashboard) -->
+  <nav class="app-nav">
+    <div class="app-nav-inner">
+      <div class="app-nav-brand">
+        <a href="/" class="back-to-dashboard" title="Back to tasks">←</a>
+        <span class="brand-mark">●</span>
+        <span class="brand-title">Rating UI</span>
+        <span class="task-nav-title" id="task-nav-title">Loading task…</span>
+        <span class="status-pill" id="task-nav-status" style="display:none"></span>
+      </div>
+      <div class="app-nav-user">
+        <span class="nav-user-name">{{ current_user.display_name or current_user.username }}</span>
+        <span class="nav-user-role role-{{ current_user.role.value | lower }}">{{ current_user.role.value }}</span>
+        <form method="post" action="/logout" class="d-inline-block ms-2">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Sign out</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Bootstrap data: read by task-bootstrap inline script + app.js -->
+  <script id="task-bootstrap-data" type="application/json">
+    {
+      "task_id": {{ task_id }},
+      "user": {
+        "id": {{ current_user.id }},
+        "username": "{{ current_user.username }}",
+        "role": "{{ current_user.role.value }}"
+      }
+    }
+  </script>
+  <script>
+    // Tag <body> with role so CSS can hide L1-only chrome for L2
+    (function(){
+      try {
+        const data = JSON.parse(document.getElementById("task-bootstrap-data").textContent);
+        window.__rating_ui_task = data;
+        document.body.classList.add("task-role-" + data.user.role.toLowerCase());
+      } catch (e) { /* noop */ }
+    })();
+  </script>
+
   <div class="app-shell container-fluid py-4">
 
     <!-- ── Workflow guide — very top ────────────────────────────────────────── -->
-    <div class="workflow-panel mb-4">
+    <div class="workflow-panel mb-4 task-legacy-hide">
       <div class="wf-steps-wrap">
 
         <div class="wf-step" id="wf1">
@@ -66,7 +109,7 @@
     </div>
 
     <!-- ── Hero ─────────────────────────────────────────────────────────────── -->
-    <header class="hero-panel mb-4">
+    <header class="hero-panel mb-4 task-legacy-hide">
       <div>
         <p class="eyebrow mb-2">Local Review Workspace</p>
         <h1 class="mb-1">Prediction Rating UI</h1>
@@ -81,7 +124,9 @@
     </header>
 
     <!-- ── Setup panel ───────────────────────────────────────────────────────── -->
-    <section class="toolbar-panel mb-4">
+    <!-- Path inputs remain in DOM (app.js depends on them) but the visible
+         setup panel is L1-only. L2 only sees the review queue + viewer below. -->
+    <section class="toolbar-panel mb-4 role-l1-only">
 
       <!-- Step 1 — Load Images -->
       <div class="setup-row">
