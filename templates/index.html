@@ -375,12 +375,17 @@
               <option value="pavement">Pavement (CC)</option>
             </select>
             <button class="btn btn-sm btn-outline-primary" id="draw-polygon-btn" type="button">✏️ Draw Polygon</button>
+            <button class="btn btn-sm btn-outline-info" id="sam2-tool-btn" type="button"
+                    title="AI-assist: click on the object you want to outline" disabled>
+              🪄 SAM2
+            </button>
             <button class="btn btn-sm btn-outline-secondary" id="undo-polygon-btn" type="button">Undo</button>
             <button class="btn btn-sm btn-outline-danger" id="clear-polygons-btn" type="button">Clear All</button>
           </div>
           <div class="annot-right">
             <span class="annot-count" id="polygon-count">0 polygons</span>
             <span class="annot-hint" id="annot-hint" style="display:none">Click to place points &nbsp;·&nbsp; double-click or click first point to close</span>
+            <span class="annot-hint annot-hint-sam2" id="annot-hint-sam2" style="display:none">Click anywhere on the object — SAM2 will outline it for you</span>
           </div>
         </div>
 

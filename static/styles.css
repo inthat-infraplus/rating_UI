@@ -626,6 +626,53 @@ body {
   cursor: crosshair;
 }
 
+/* SAM2 mode: special cursor so users know a single click triggers the AI,
+   distinct from the polygon-vertex crosshair. */
+.annotation-canvas.sam2-mode {
+  cursor: cell;
+}
+
+/* SAM2 button — sits next to "Draw Polygon", visually distinct so users
+   read it as a different mode rather than another polygon-shape variant. */
+#sam2-tool-btn.active {
+  background: #5b21b6;
+  color: #fff;
+  border-color: #5b21b6;
+}
+
+#sam2-tool-btn.loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+#sam2-tool-btn.loading::after {
+  content: "";
+  position: absolute;
+  right: 0.4rem;
+  top: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-top: -0.35rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: sam2Spin 0.7s linear infinite;
+}
+
+@keyframes sam2Spin {
+  to { transform: rotate(360deg); }
+}
+
+#sam2-tool-btn:disabled {
+  cursor: help;  /* user can hover/click for the unavailability reason */
+}
+
+.annot-hint-sam2 {
+  color: #5b21b6;
+  font-weight: 600;
+}
+
 .empty-stage {
   padding: 2rem;
   text-align: center;

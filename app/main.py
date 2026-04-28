@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from sqlalchemy import select
 
-from . import task_service
+from . import sam2_service, task_service
 from .auth import (
     authenticate,
     current_user,
@@ -42,6 +42,7 @@ from .models import (
     FolderRequest,
     ImageAnnotationUpdateRequest,
     ReviewUpdateRequest,
+    Sam2SegmentRequest,
     ScaleProfileLinkRequest,
     SessionConfigUpdateRequest,
     UiStateUpdateRequest,
@@ -479,6 +480,72 @@ async def calculate_area(request: AreaCalculationRequest) -> JSONResponse:
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(content={"value": value, "unit": unit})
+
+
+@app.get("/api/sam2/status")
+async def sam2_status(request: Request) -> JSONResponse:
+    """Cheap probe: does the server have SAM2 ready to go? Used by the
+    front-end to enable/disable the 🪄 SAM2 button at page load. We require
+    auth so anonymous users don't fingerprint the install footprint."""
+    require_user(request)
+    ok, reason = sam2_service.is_available()
+    return JSONResponse(
+        content={
+            "available": ok,
+            "reason": reason,
+            "model_path": str(sam2_service.model_path()),
+        }
+    )
+
+
+@app.post("/api/sam2/segment")
+async def sam2_segment(request: Request, payload: Sam2SegmentRequest) -> JSONResponse:
+    """Run SAM2 on one click (or set of clicks) and return polygon vertices
+    in normalized 0..1 coords, ready to drop into the existing polygon
+    storage. Auth-required because the model is expensive to invoke."""
+    require_user(request)
+
+    # Reuse the same path-validation helpers /api/image uses, so a malicious
+    # `relative_path` can't escape the folder.
+    try:
+        folder = normalize_folder(payload.folder_path)
+        image_path = validate_relative_path(folder, payload.relative_path)
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    points_norm = [(p.x, p.y) for p in payload.points]
+    if not points_norm:
+        raise HTTPException(
+            status_code=400, detail="At least one click point is required."
+        )
+
+    try:
+        result = await run_in_threadpool(
+            sam2_service.segment_at_points,
+            image_path,
+            points_norm,
+            payload.labels,
+            image_natural_width=payload.image_natural_width,
+            image_natural_height=payload.image_natural_height,
+        )
+    except sam2_service.Sam2Unavailable as exc:
+        # 503 (service unavailable) — distinguishes "feature not configured"
+        # from request validation errors and lets the front-end surface the
+        # install hint to the operator.
+        raise HTTPException(
+            status_code=503,
+            detail=exc.hint or str(exc),
+        ) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return JSONResponse(
+        content={
+            "polygons": [{"points": p.points} for p in result.polygons],
+            "duration_ms": result.duration_ms,
+            "model_path": result.model_path,
+        }
+    )
 
 
 @app.post("/api/export-updated-csv")

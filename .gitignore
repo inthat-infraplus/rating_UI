@@ -14,3 +14,11 @@ build/
 *.db-wal
 *.db-shm
 
+# AI model weights — too large for git (sam2.1_b.pt is ~160 MB).
+# Ops downloads them once and either places at <repo-root>/models/sam2.1_b.pt
+# or points RATING_UI_SAM2_MODEL at the file.
+models/
+*.pt
+*.pth
+*.onnx
+

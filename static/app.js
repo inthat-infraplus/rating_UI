@@ -12,6 +12,10 @@ const state = {
   finishedPolygons: [],    // [{id, class_label, points:[{x,y}]}] canvas-pixel coords
   annotationSaveTimer: null,
   mousePt: null,           // {x, y} canvas-pixel, for preview line
+  // SAM2 AI-assist
+  sam2Mode: false,         // true while user is in click-to-segment mode
+  sam2Available: false,    // updated from /api/sam2/status on page load
+  sam2Pending: false,      // throttle: ignore clicks while a request is in flight
 };
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -53,10 +57,12 @@ const toast                  = document.getElementById("toast");
 const annotationToolbar      = document.getElementById("annotation-toolbar");
 const classSelect            = document.getElementById("class-select");
 const drawPolygonBtn         = document.getElementById("draw-polygon-btn");
+const sam2ToolBtn            = document.getElementById("sam2-tool-btn");
 const undoPolygonBtn         = document.getElementById("undo-polygon-btn");
 const clearPolygonsBtn       = document.getElementById("clear-polygons-btn");
 const polygonCountLabel      = document.getElementById("polygon-count");
 const annotHint              = document.getElementById("annot-hint");
+const annotHintSam2          = document.getElementById("annot-hint-sam2");
 // bbox controls
 const bboxToggleRow          = document.getElementById("bbox-toggle-row");
 const bboxToggle             = document.getElementById("bbox-toggle");
@@ -454,6 +460,119 @@ function exitDrawMode() {
   redrawCanvas();
 }
 
+// ── SAM2 AI-assist: click anywhere on an object → server returns polygon ─────
+function enterSam2Mode() {
+  if (!state.sam2Available) {
+    showToast("SAM2 isn't ready on the server. See /api/sam2/status.");
+    return;
+  }
+  // Only one tool active at a time. Bail out of polygon-draw mode if needed.
+  if (state.drawMode) exitDrawMode();
+  state.sam2Mode = true;
+  annotationCanvas.classList.add("sam2-mode");
+  annotationCanvas.style.pointerEvents = "auto";
+  if (sam2ToolBtn) sam2ToolBtn.classList.add("active");
+  if (annotHintSam2) annotHintSam2.style.display = "";
+}
+
+function exitSam2Mode() {
+  state.sam2Mode = false;
+  annotationCanvas.classList.remove("sam2-mode");
+  // Don't blanket-disable pointer events — drawMode may have set them on.
+  if (!state.drawMode) annotationCanvas.style.pointerEvents = "none";
+  if (sam2ToolBtn) sam2ToolBtn.classList.remove("active");
+  if (annotHintSam2) annotHintSam2.style.display = "none";
+}
+
+async function runSam2AtClick(canvasPt) {
+  if (state.sam2Pending) return;
+  const image = currentImage();
+  if (!state.session || !image) {
+    showToast("No image loaded.");
+    return;
+  }
+  state.sam2Pending = true;
+  if (sam2ToolBtn) sam2ToolBtn.classList.add("loading");
+  showToast("SAM2 is thinking…");
+
+  try {
+    const norm = canvasToNorm(canvasPt.x, canvasPt.y);
+    const response = await api("/api/sam2/segment", {
+      method: "POST",
+      body: JSON.stringify({
+        folder_path: state.session.folder_path,
+        relative_path: image.relative_path,
+        points: [norm],
+        labels: [1],
+        image_natural_width: mainImage.naturalWidth || 1,
+        image_natural_height: mainImage.naturalHeight || 1,
+      }),
+    });
+    const result = await response.json();
+    const polys = result.polygons || [];
+    if (polys.length === 0) {
+      showToast("SAM2 didn't find an object at that point — try clicking the centre of the shape.");
+      return;
+    }
+
+    // Add ALL returned polygons (usually one, but SAM2 can split). Each
+    // gets the currently-selected class label and is treated identically
+    // to a hand-drawn polygon from here on (incl. area calculation).
+    for (const p of polys) {
+      const canvasPoints = p.points.map((pt) => normToCanvas(pt.x, pt.y));
+      if (canvasPoints.length < 3) continue;
+      const newPoly = {
+        id: genId(),
+        class_label: classSelect.value,
+        points: canvasPoints,
+        value: null,
+        unit: "",
+      };
+      state.finishedPolygons.push(newPoly);
+      calculatePolygonArea(newPoly); // fire-and-forget
+    }
+    updateAnnotationToolbar();
+    redrawCanvas();
+    queueAnnotationSave();
+    showToast(`SAM2 added ${polys.length} polygon${polys.length === 1 ? "" : "s"} (${result.duration_ms} ms).`);
+  } catch (err) {
+    if (err.status === 503) {
+      // Service-not-configured — surface the install hint.
+      state.sam2Available = false;
+      updateSam2Button();
+      showToast(err.message || "SAM2 is not installed on the server.");
+    } else {
+      showToast(`SAM2 failed: ${err.message || "unknown error"}`);
+    }
+  } finally {
+    state.sam2Pending = false;
+    if (sam2ToolBtn) sam2ToolBtn.classList.remove("loading");
+  }
+}
+
+function updateSam2Button() {
+  if (!sam2ToolBtn) return;
+  sam2ToolBtn.disabled = !state.sam2Available;
+  sam2ToolBtn.title = state.sam2Available
+    ? "AI-assist: click on the object you want to outline"
+    : "SAM2 is not configured on the server. Click for details.";
+}
+
+async function probeSam2Availability() {
+  try {
+    const response = await api("/api/sam2/status");
+    const data = await response.json();
+    state.sam2Available = !!data.available;
+    if (!data.available && data.reason) {
+      // Stash the reason on the button so a click can surface it.
+      if (sam2ToolBtn) sam2ToolBtn.dataset.unavailableReason = data.reason;
+    }
+  } catch (err) {
+    state.sam2Available = false;
+  }
+  updateSam2Button();
+}
+
 function closeCurrentPolygon() {
   if (state.currentPolygon.length < 3) {
     showToast("Need at least 3 points to close a polygon.");
@@ -510,6 +629,13 @@ async function calculatePolygonArea(poly) {
 let _clickTimer = null;
 
 annotationCanvas.addEventListener("click", (e) => {
+  // SAM2 mode: a single click ships the point to the server for a mask.
+  // Don't go through the polygon-draw timer logic — SAM2 is one-shot.
+  if (state.sam2Mode) {
+    runSam2AtClick(getCanvasPos(e));
+    return;
+  }
+
   if (!state.drawMode) return;
 
   const pt = getCanvasPos(e);
@@ -1236,8 +1362,23 @@ document.getElementById("filter-group").addEventListener("click", (event) => {
 
 // Annotation toolbar
 drawPolygonBtn.addEventListener("click", () => {
+  // Tools are mutually exclusive — turn off SAM2 if it's the active mode.
+  if (state.sam2Mode) exitSam2Mode();
   if (state.drawMode) { exitDrawMode(); } else { enterDrawMode(); }
 });
+
+if (sam2ToolBtn) {
+  sam2ToolBtn.addEventListener("click", () => {
+    // Disabled state still receives clicks via JS — surface the hint.
+    if (!state.sam2Available) {
+      const reason = sam2ToolBtn.dataset.unavailableReason
+        || "SAM2 is not configured on the server.";
+      showToast(reason);
+      return;
+    }
+    if (state.sam2Mode) exitSam2Mode(); else enterSam2Mode();
+  });
+}
 
 undoPolygonBtn.addEventListener("click", () => {
   if (state.drawMode && state.currentPolygon.length > 0) {
@@ -1651,6 +1792,12 @@ function formatEventTime(iso) {
   // Annotation canvas: pointer-events off until draw mode activated
   annotationCanvas.style.pointerEvents = "none";
   imageCanvasWrap.style.display = "none";
+
+  // Probe SAM2 availability in parallel with the rest of init so the
+  // 🪄 button enables itself as soon as the server confirms it has the
+  // model loaded. Errors here are non-fatal — the button just stays
+  // disabled with the failure reason on hover.
+  probeSam2Availability().catch(() => { /* already handled */ });
 
   // Task-detail mode (preferred): the page was rendered as /tasks/{id}.
   if (window.__rating_ui_task && window.__rating_ui_task.task_id) {

@@ -32,6 +32,35 @@ python -m uvicorn app.main:app --reload
 
 Subsequent users can be created from the L1 admin page at `/admin/users` (the **⚙ Users** link in the top nav).
 
+### AI-assist labelling with SAM2 (optional)
+
+The annotation toolbar has a **🪄 SAM2** button next to *Draw Polygon*. When
+enabled, an annotator can click anywhere on an object in the image and the
+server runs Meta's Segment Anything 2 (via Ultralytics' SAM2 wrapper) to
+return a polygon outlining the object — much faster than tracing it by hand.
+
+The button stays disabled until the server confirms SAM2 is ready. To enable:
+
+```powershell
+# 1. Install the optional ML deps (heavy — ~2 GB for torch + CUDA)
+python -m pip install ultralytics
+
+# 2. Place the SAM2 weights at <repo-root>/models/sam2.1_b.pt
+#    (or set RATING_UI_SAM2_MODEL to an absolute path of your choice)
+mkdir models
+# copy sam2.1_b.pt into ./models/
+
+# 3. Restart the app — the 🪄 button will turn live for all annotators
+```
+
+Notes:
+- Model is lazy-loaded on the first request, not at startup, so the app
+  still boots quickly even with the deps installed.
+- Returned polygons go through the same flow as hand-drawn ones: same
+  storage, same area calculation, same submit/QC pipeline.
+- If SAM2 isn't available the button stays greyed out; clicking it shows
+  the install hint, so annotators always know why it's disabled.
+
 ### Setting the session secret
 
 For production / shared deployments, set a stable cookie-signing key so sessions survive restarts:

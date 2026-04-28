@@ -72,6 +72,18 @@ class AreaCalculationRequest(BaseModel):
     image_natural_height: int
 
 
+class Sam2SegmentRequest(BaseModel):
+    """Click-to-segment with SAM2. `points` are normalized 0..1 image coords;
+    `labels` are 1 for foreground (include) / 0 for background (exclude),
+    one per point. Either omit `labels` or pass the same length as points."""
+    folder_path: str = Field(..., min_length=1)
+    relative_path: str = Field(..., min_length=1)
+    points: list[PolygonPoint]
+    labels: list[int] | None = None
+    image_natural_width: int
+    image_natural_height: int
+
+
 class PredictionBox(BaseModel):
     object_id: int
     class_label: str
