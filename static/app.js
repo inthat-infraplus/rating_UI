@@ -71,6 +71,7 @@ const progressBar            = document.getElementById("progress-bar");
 const queueMeta              = document.getElementById("queue-meta");
 const queueList              = document.getElementById("queue-list");
 const queueCollapseBtn       = document.getElementById("queue-collapse-btn");
+const queuePanel             = document.getElementById("queue-panel");
 const queueProgressInline    = document.getElementById("queue-progress-inline");
 const batchAcceptBtn         = document.getElementById("batch-accept-btn");
 const viewerTitle            = document.getElementById("viewer-title");
@@ -927,6 +928,8 @@ function redrawCanvas() {
     if (!poly.points.length || !isPolygonVisible(poly)) continue;
     const color = polyColor(i);
     const isActive = poly.id === state.activeMaskId;
+    const isHover = poly.id === state.hoverMaskId;
+    const showDetail = isActive || isHover;
 
     ctx.beginPath();
     ctx.moveTo(poly.points[0].x, poly.points[0].y);
@@ -934,17 +937,23 @@ function redrawCanvas() {
       ctx.lineTo(poly.points[j].x, poly.points[j].y);
     }
     ctx.closePath();
-    ctx.strokeStyle = isActive ? "#1d4ed8" : color;
-    ctx.lineWidth = isActive ? 4 : 2.5;
+    ctx.strokeStyle = showDetail ? (isActive ? "#1d4ed8" : color) : "rgba(0,0,0,0)";
+    ctx.lineWidth = showDetail ? (isActive ? 4 : 2.5) : 0.1;
     ctx.setLineDash([]);
     ctx.stroke();
-    ctx.fillStyle = isActive ? "rgba(29, 78, 216, 0.18)" : color + "33"; // ~20% opacity fill
+    ctx.fillStyle = showDetail ? (isActive ? "rgba(29, 78, 216, 0.18)" : color + "33") : "rgba(0,0,0,0)";
     ctx.fill();
 
     // Class label + real-world value — pill badge at polygon centroid
     const cx = poly.points.reduce((s, p) => s + p.x, 0) / poly.points.length;
     const cy = poly.points.reduce((s, p) => s + p.y, 0) / poly.points.length;
-    drawPolygonBadge(cx, cy, poly.class_label, poly.value, poly.unit, isActive ? "#1d4ed8" : color);
+    ctx.beginPath();
+    ctx.arc(cx, cy, showDetail ? 5 : 3.8, 0, Math.PI * 2);
+    ctx.fillStyle = isActive ? "#1d4ed8" : color;
+    ctx.fill();
+    if (showDetail) {
+      drawPolygonBadge(cx, cy, poly.class_label, poly.value, poly.unit, isActive ? "#1d4ed8" : color);
+    }
   }
 
   if ((state.brushMode || state.eraserMode) && state.brushStrokePoints.length) {
@@ -1076,6 +1085,7 @@ function redrawCanvas() {
 // ── Polygon drawing logic ────────────────────────────────────────────────────
 function enterDrawMode() {
   exitBrushTools();
+  state.hoverMaskId = null;
   state.drawMode = true;
   state.currentPolygon = [];
   state.mousePt = null;
@@ -1107,6 +1117,7 @@ function enterBrushMode() {
     exitSam2Mode();
   }
   if (state.drawMode) exitDrawMode();
+  state.hoverMaskId = null;
   state.brushMode = true;
   state.eraserMode = false;
   state.brushStrokeActive = false;
@@ -1123,6 +1134,7 @@ function enterEraserMode() {
     exitSam2Mode();
   }
   if (state.drawMode) exitDrawMode();
+  state.hoverMaskId = null;
   state.eraserMode = true;
   state.brushMode = false;
   state.brushStrokeActive = false;
@@ -1300,6 +1312,7 @@ function enterSam2Mode() {
     exitDrawMode();
   }
   if (state.brushMode || state.eraserMode) exitBrushTools();
+  state.hoverMaskId = null;
   state.sam2Mode = true;
   annotationCanvas.classList.add("sam2-mode");
   annotationCanvas.style.pointerEvents = "auto";
@@ -1669,6 +1682,13 @@ annotationCanvas.addEventListener("dblclick", (e) => {
 });
 
 annotationCanvas.addEventListener("mousemove", (e) => {
+  if (!state.drawMode && !state.sam2Mode && !state.brushMode && !state.eraserMode) {
+    const hoverId = hitTestFinishedMask(getCanvasPos(e));
+    if (hoverId !== state.hoverMaskId) {
+      state.hoverMaskId = hoverId;
+      redrawCanvas();
+    }
+  }
   if ((state.brushMode || state.eraserMode) && state.brushStrokeActive) {
     const point = getCanvasPos(e);
     pushBrushSample(point);
@@ -1754,6 +1774,7 @@ window.addEventListener("mouseup", () => {
 });
 
 annotationCanvas.addEventListener("mouseleave", () => {
+  state.hoverMaskId = null;
   if (state.brushStrokeActive && (state.brushMode || state.eraserMode)) {
     redrawCanvas();
     return;
@@ -1916,6 +1937,25 @@ function queueBadge(item) {
   return html;
 }
 
+function previousPathInCurrentFilter() {
+  if (!state.session) return null;
+  const filtered = filterImages(state.session.images, state.activeFilter);
+  if (!filtered.length) return null;
+  const index = filtered.findIndex((item) => item.relative_path === state.currentRelativePath);
+  if (index <= 0) return null;
+  return filtered[index - 1].relative_path;
+}
+
+function queueItemMarkup(item, index, isActive) {
+  return `
+    <button class="queue-item ${isActive ? "active" : ""}" data-relative-path="${encodeURIComponent(item.relative_path)}" type="button">
+      <span class="queue-title">${index + 1}. ${escapeHtml(item.filename)}</span>
+      <span class="queue-path">${escapeHtml(item.relative_path)}</span>
+      <div class="queue-badges">${queueBadge(item)}</div>
+    </button>
+  `;
+}
+
 function syncCurrentImage() {
   const image = currentImage();
   state.currentRelativePath = image ? image.relative_path : null;
@@ -1930,7 +1970,9 @@ function renderQueue() {
   }
 
   const filtered = filterImages(state.session.images, state.activeFilter);
-  queueMeta.textContent = `${filtered.length} images in ${state.activeFilter} view`;
+  const reviewed = state.session.images.filter((item) => item.reviewed);
+  const unreviewed = state.session.images.filter((item) => !item.reviewed);
+  queueMeta.textContent = `${filtered.length} images in ${state.activeFilter} view · ${unreviewed.length} unreviewed · ${reviewed.length} reviewed`;
   if (queueProgressInline) {
     const summary = state.session.summary;
     queueProgressInline.textContent = `${summary.reviewed_count}/${summary.total_count} completed (${summary.percent_reviewed}%)`;
@@ -1941,16 +1983,28 @@ function renderQueue() {
     return;
   }
 
-  queueList.innerHTML = filtered.map((item, index) => {
-    const isActive = item.relative_path === state.currentRelativePath;
-    return `
-      <button class="queue-item ${isActive ? "active" : ""}" data-relative-path="${encodeURIComponent(item.relative_path)}" type="button">
-        <span class="queue-title">${index + 1}. ${escapeHtml(item.filename)}</span>
-        <span class="queue-path">${escapeHtml(item.relative_path)}</span>
-        <div class="queue-badges">${queueBadge(item)}</div>
-      </button>
+  if (state.activeFilter === "all" && !state.queueCollapsed) {
+    const unreviewedHtml = unreviewed.length
+      ? unreviewed.map((item, index) => queueItemMarkup(item, index, item.relative_path === state.currentRelativePath)).join("")
+      : '<div class="text-muted">No unreviewed images.</div>';
+    const reviewedHtml = reviewed.length
+      ? reviewed.map((item, index) => queueItemMarkup(item, index, item.relative_path === state.currentRelativePath)).join("")
+      : '<div class="text-muted">No reviewed images.</div>';
+    queueList.innerHTML = `
+      <div class="queue-section">
+        <div class="queue-section-title">Unreviewed (${unreviewed.length})</div>
+        ${unreviewedHtml}
+      </div>
+      <div class="queue-section">
+        <div class="queue-section-title">Reviewed (${reviewed.length})</div>
+        ${reviewedHtml}
+      </div>
     `;
-  }).join("");
+  } else {
+    queueList.innerHTML = filtered.map((item, index) => (
+      queueItemMarkup(item, index, item.relative_path === state.currentRelativePath)
+    )).join("");
+  }
 
   queueList.querySelectorAll(".queue-item").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2227,7 +2281,7 @@ async function importBrowserFolder(fileList) {
 }
 
 // ── Review actions ───────────────────────────────────────────────────────────
-async function updateDecision(decision) {
+async function updateDecision(decision, options = {}) {
   const image = currentImage();
   if (!state.session || !image) return;
   if (!ensureNoPendingSam2Draft(`mark this image as ${decision}`)) return false;
@@ -2242,7 +2296,13 @@ async function updateDecision(decision) {
   });
   const payload = await response.json();
   state.session = payload.session;
-  state.currentRelativePath = image.relative_path;
+  const preferredRelativePath = options.preferredRelativePath || null;
+  const filteredAfter = filterImages(state.session.images, state.activeFilter);
+  if (preferredRelativePath && filteredAfter.some((item) => item.relative_path === preferredRelativePath)) {
+    state.currentRelativePath = preferredRelativePath;
+  } else {
+    state.currentRelativePath = image.relative_path;
+  }
   render();
   persistUiState();
   return true;
@@ -2648,7 +2708,8 @@ undoActionBtn?.addEventListener("click", () => {
 
 clearBtn.addEventListener("click", async () => {
   try {
-    const changed = await updateDecision("unreviewed");
+    const previousPath = previousPathInCurrentFilter();
+    const changed = await updateDecision("unreviewed", { preferredRelativePath: previousPath });
     if (changed) showToast("Cleared review state.");
   }
   catch (err) { showToast(err.message); }
@@ -2670,8 +2731,22 @@ document.getElementById("filter-group").addEventListener("click", (event) => {
 });
 
 queueCollapseBtn?.addEventListener("click", () => {
+  const expanding = state.queueCollapsed;
   state.queueCollapsed = !state.queueCollapsed;
+  if (expanding) {
+    state.activeFilter = "all";
+    persistUiState();
+  }
   render();
+});
+
+queuePanel?.addEventListener("click", (event) => {
+  if (!state.queueCollapsed) return;
+  if (event.target.closest("button, a, input, select, textarea")) return;
+  state.queueCollapsed = false;
+  state.activeFilter = "all";
+  render();
+  persistUiState();
 });
 
 toggleQuickReviewBtn?.addEventListener("click", () => {
@@ -2955,7 +3030,10 @@ window.addEventListener("keydown", async (event) => {
         render();
       }
     } else if (event.key.toLowerCase() === "u") {
-      if (await updateDecision("unreviewed")) showToast("Cleared review state.");
+      const previousPath = previousPathInCurrentFilter();
+      if (await updateDecision("unreviewed", { preferredRelativePath: previousPath })) {
+        showToast("Cleared review state.");
+      }
     } else if (event.key === "Delete" || event.key === "Backspace") {
       if (state.sam2Mode || hasPendingSam2Draft()) {
         undoSam2Prompt();

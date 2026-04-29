@@ -434,6 +434,31 @@ body {
   scrollbar-gutter: stable;
 }
 
+.queue-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--queue-gap);
+}
+
+.queue-section + .queue-section {
+  margin-top: 0.4rem;
+}
+
+.queue-section-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5a7280;
+  background: rgba(246, 251, 253, 0.94);
+  border: 1px solid rgba(24, 49, 63, 0.08);
+  border-radius: 10px;
+  padding: 0.35rem 0.55rem;
+}
+
 .queue-list::-webkit-scrollbar { width: 10px; }
 .queue-list::-webkit-scrollbar-track { background: transparent; }
 .queue-list::-webkit-scrollbar-thumb {
@@ -901,10 +926,10 @@ body {
   border-radius: 16px;
   padding: 0.75rem 0.8rem;
   background: #fff;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.6rem;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.48rem;
+  align-items: stretch;
   cursor: pointer;
 }
 
@@ -927,6 +952,7 @@ body {
   gap: 0.5rem;
   font-weight: 700;
   color: #18313f;
+  overflow-wrap: anywhere;
 }
 
 .mask-color-dot {
@@ -943,13 +969,16 @@ body {
 }
 
 .mask-list-actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 0.35rem;
+  align-items: center;
+  width: 100%;
 }
 
 .mask-class-select {
-  min-width: 9.2rem;
+  min-width: 0;
+  width: 100%;
   height: 2rem;
   padding-top: 0.1rem;
   padding-bottom: 0.1rem;
@@ -2324,6 +2353,117 @@ body.task-theme-dark .task-action-comments #task-comment-count.zero {
   color: #f8fafc;
 }
 
+body.task-theme-dark .zoom-controls {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+body.task-theme-dark .zoom-value {
+  color: #e2e8f0;
+}
+
+body.task-theme-dark .bbox-toggle-row {
+  background: rgba(15, 23, 42, 0.84);
+  border-color: rgba(148, 163, 184, 0.32);
+}
+
+body.task-theme-dark .bbox-toggle-label {
+  color: #e2e8f0;
+}
+
+body.task-theme-dark .annotation-toolbar {
+  background: rgba(15, 23, 42, 0.86);
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
+body.task-theme-dark .annot-label,
+body.task-theme-dark .annot-hint {
+  color: #cbd5e1;
+}
+
+body.task-theme-dark .mask-icon-btn {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.32);
+  color: #dbeafe;
+}
+
+body.task-theme-dark .mask-icon-btn:hover {
+  background: rgba(30, 41, 59, 0.88);
+}
+
+body.task-theme-dark .queue-section-title {
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.92);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+body.task-theme-dark .image-stage {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.72));
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+body.task-theme-dark .empty-stage {
+  color: #cbd5e1;
+}
+
+body.task-theme-dark .correction-mode-panel,
+body.task-theme-dark .prediction-sidebar {
+  background: rgba(15, 23, 42, 0.92);
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
+body.task-theme-dark .prediction-item {
+  background: rgba(30, 41, 59, 0.92);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+body.task-theme-dark .prediction-item.locked {
+  background: rgba(51, 65, 85, 0.75);
+}
+
+body.task-theme-dark .prediction-action-btn {
+  background: rgba(15, 23, 42, 0.9);
+  color: #dbeafe;
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
+body.task-theme-dark .prediction-action-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+body.task-theme-dark .mask-sidebar-meta,
+body.task-theme-dark .prediction-subtitle {
+  color: #b8c7da;
+}
+
+body.task-theme-dark .queue-meta {
+  color: #dbe7f6;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+body.task-theme-dark .badge-unreviewed {
+  background: rgba(148, 163, 184, 0.3);
+  color: #f1f5f9;
+}
+
+body.task-theme-dark .badge-correct {
+  background: rgba(16, 185, 129, 0.28);
+  color: #d1fae5;
+}
+
+body.task-theme-dark .badge-wrong {
+  background: rgba(239, 68, 68, 0.3);
+  color: #fee2e2;
+}
+
+body.task-theme-dark .badge-annotated {
+  background: rgba(124, 58, 237, 0.32);
+  color: #ede9fe;
+}
+
 .focus-status-bar {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -2372,6 +2512,10 @@ body.task-theme-dark .task-action-comments #task-comment-count.zero {
 
 .review-layout.queue-collapsed {
   grid-template-columns: 64px minmax(0, 1fr);
+}
+
+.review-layout.queue-collapsed #queue-panel {
+  cursor: pointer;
 }
 
 .review-layout.queue-collapsed #queue-list,
