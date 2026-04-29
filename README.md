@@ -50,21 +50,20 @@ python -m uvicorn app.main:app --reload
 
 Subsequent users can be created from the L1 admin page at `/admin/users` (the **⚙ Users** link in the top nav).
 
-### AI-assist labelling with SAM2 (optional)
+### AI-assist labelling with SAM3 (optional)
 
-The annotation toolbar has a **🪄 SAM2** button next to *Draw Polygon*. When
-enabled, an annotator can click anywhere on an object in the image and the
-server runs Meta's Segment Anything 2 (via Ultralytics' SAM2 wrapper) to
-return a polygon outlining the object — much faster than tracing it by hand.
+The annotation toolbar has a **🪄 SAM3** button next to *Draw Polygon*. When
+enabled, an annotator can click or prompt on an object in the image and the
+server runs SAM3 to return polygon candidates much faster than tracing by hand.
 
-The button stays disabled until the server confirms SAM2 is ready. To enable:
+The button stays disabled until the server confirms SAM3 is ready. To enable:
 
 ```powershell
 # 1. Install the optional ML deps (heavy — ~2 GB for torch + CUDA)
 python -m pip install ultralytics
 
-# 2. Place the SAM2 weights at <repo-root>/models/sam2.1_b.pt
-#    (or set RATING_UI_SAM2_MODEL to an absolute path of your choice)
+# 2. Place model weights at <repo-root>/models/sam2.1_b.pt
+#    (or set RATING_UI_SAM2_MODEL to an absolute path)
 mkdir models
 # copy sam2.1_b.pt into ./models/
 
@@ -76,7 +75,7 @@ Notes:
   still boots quickly even with the deps installed.
 - Returned polygons go through the same flow as hand-drawn ones: same
   storage, same area calculation, same submit/QC pipeline.
-- If SAM2 isn't available the button stays greyed out; clicking it shows
+- If SAM3 isn't available the button stays greyed out; clicking it shows
   the install hint, so annotators always know why it's disabled.
 
 ### Setting the session secret
@@ -103,14 +102,21 @@ If the env var is missing, the app warns at startup and uses an insecure dev key
 - Browser-side folder import so users can choose a folder directly from their PC in the web page
 - Resume per-folder review state automatically
 - Review states: `unreviewed`, `correct`, `wrong`
-- Filter views: `all`, `reviewed`, `unreviewed`, `selected`
+- Queue filters: `all`, `unreviewed`, `wrong`, `completed` (legacy `reviewed/selected` still accepted)
 - Progress tracking with reviewed and selected counters
 - Autosave of both review decisions and last UI position/filter
 - Export selected images only as a zip bundle
 - Export selected filenames only as a plain text list
 - Manifest output in both JSON and CSV
 - Export manifest includes target/original image mapping for Label Studio style follow-up workflows
-- Keyboard shortcuts for faster review
+- Decision-first actions: `Accept`, `Fix`, `Delete`, `Reset`, `Undo`
+- Batch accept by confidence threshold
+- Quick review mode (decision-only, reduced edit clutter)
+- Theme toggle (dark/light) with persisted UI state
+- Brush + eraser tools with explicit `Confirm Brush Mask`
+- Full-screen-first task detail layout with larger image stage
+- Zoom/pan workflow: zoom controls, Ctrl/Cmd+wheel zoom, and pan while zoomed
+- Keyboard-first shortcuts for faster review
 
 ## Supported image formats
 
@@ -250,21 +256,26 @@ After that, LAN users can open:
    - Or paste the path directly and click `Save Target Path`
 3. The app scans the folder recursively for supported images.
 4. Review each image:
-   - `Mark Correct`: image is reviewed and not exported
-   - `Mark Wrong / Export`: image is reviewed and added to the export set
-   - `Clear`: reset the image back to `unreviewed`
-5. Use filters on the left to focus on `reviewed`, `unreviewed`, or `selected` images.
+   - `Accept`: image is reviewed as `correct`
+   - `Fix`: image is reviewed as `wrong` and opens correction workflow
+   - `Delete`: marks selected prediction object for deletion in fix workflow
+   - `Reset`: set image back to `unreviewed`
+5. Use filters on the left to focus on `all`, `unreviewed`, `wrong`, or `completed` images.
 6. Export one of two ways:
    - `Export Selected Zip`: prediction images + JSON/CSV manifest + target mapping
    - `Export Selected TXT`: only selected prediction filenames, one filename per line
+7. For brush editing workflows, paint freely (lift mouse and continue), then click `Confirm Brush Mask` to commit one polygon.
 
 ## Keyboard Shortcuts
 
-- `A` or `Left Arrow`: previous image
-- `D` or `Right Arrow`: next image
-- `C`: mark correct
-- `W`: mark wrong
-- `U`: clear review state
+- `A`: accept current image
+- `F`: mark image as fix-needed
+- `D`: delete selected object (in fix flow)
+- `Left Arrow` / `Right Arrow`: previous / next image
+- `Z`: undo current edit action
+- Aliases kept for compatibility: `C` (accept), `W` (fix), `U` (reset to unreviewed)
+- Hold `Space` + drag (or middle-mouse drag) to pan while zoomed
+- `Ctrl/Cmd + Mouse Wheel`: zoom toward cursor in the image stage
 
 ## Export Format
 
