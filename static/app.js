@@ -26,6 +26,7 @@ const state = {
   brushSize: 20,
   brushStrokeActive: false,
   brushStrokePoints: [],
+  brushDraftPoints: [],
   brushLastPoint: null,
   currentPolygon: [],      // [{x, y}] canvas-pixel coords, in-progress
   finishedPolygons: [],    // [{id, class_label, points:[{x,y}]}] canvas-pixel coords
@@ -117,6 +118,8 @@ const brushToolBtn           = document.getElementById("brush-tool-btn");
 const eraserToolBtn          = document.getElementById("eraser-tool-btn");
 const brushSizeInput         = document.getElementById("brush-size-input");
 const brushSizeValue         = document.getElementById("brush-size-value");
+const brushConfirmBtn        = document.getElementById("brush-confirm-btn");
+const brushClearBtn          = document.getElementById("brush-clear-btn");
 const sam2ToolBtn            = document.getElementById("sam2-tool-btn");
 const sam2Controls           = document.getElementById("sam2-controls");
 const sam2PointModeBtn       = document.getElementById("sam2-point-mode-btn");
@@ -956,7 +959,7 @@ function redrawCanvas() {
     }
   }
 
-  if ((state.brushMode || state.eraserMode) && state.brushStrokePoints.length) {
+  if (state.brushDraftPoints.length) {
     const strokeColor = state.eraserMode ? "rgba(239, 68, 68, 0.38)" : "rgba(37, 99, 235, 0.24)";
     const lineColor = state.eraserMode ? "rgba(239, 68, 68, 0.85)" : "rgba(37, 99, 235, 0.92)";
     const radius = Math.max(2, state.brushSize / 2);
@@ -964,7 +967,7 @@ function redrawCanvas() {
     ctx.fillStyle = strokeColor;
     ctx.strokeStyle = lineColor;
     ctx.lineWidth = 1.2;
-    for (const p of state.brushStrokePoints) {
+    for (const p of state.brushDraftPoints) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
       ctx.fill();
@@ -1164,6 +1167,7 @@ function pushBrushSample(point) {
   const p = clampToCanvasPoint(point);
   if (!state.brushStrokePoints.length) {
     state.brushStrokePoints.push(p);
+    state.brushDraftPoints.push(p);
     state.brushLastPoint = p;
     return;
   }
@@ -1171,19 +1175,82 @@ function pushBrushSample(point) {
   const dx = p.x - last.x;
   const dy = p.y - last.y;
   const dist = Math.hypot(dx, dy);
-  const spacing = Math.max(1.5, state.brushSize * 0.22);
+  // Coarser sampling keeps brush polygons lighter and less zig-zaggy.
+  const spacing = Math.max(4, state.brushSize * 0.72);
   const steps = Math.max(1, Math.ceil(dist / spacing));
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    state.brushStrokePoints.push({
+    const sample = {
       x: last.x + dx * t,
       y: last.y + dy * t,
-    });
+    };
+    state.brushStrokePoints.push(sample);
+    state.brushDraftPoints.push(sample);
   }
   state.brushLastPoint = p;
 }
 
-function circlePolygon(center, radius, segments = 40) {
+function perpendicularDistance(point, lineStart, lineEnd) {
+  const dx = lineEnd.x - lineStart.x;
+  const dy = lineEnd.y - lineStart.y;
+  if (dx === 0 && dy === 0) return Math.hypot(point.x - lineStart.x, point.y - lineStart.y);
+  const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (dx * dx + dy * dy);
+  const projX = lineStart.x + t * dx;
+  const projY = lineStart.y + t * dy;
+  return Math.hypot(point.x - projX, point.y - projY);
+}
+
+function simplifyPathRdp(points, epsilon) {
+  if (!points || points.length < 3) return points ? [...points] : [];
+  const first = points[0];
+  const last = points[points.length - 1];
+  let index = -1;
+  let maxDist = -1;
+  for (let i = 1; i < points.length - 1; i++) {
+    const dist = perpendicularDistance(points[i], first, last);
+    if (dist > maxDist) {
+      maxDist = dist;
+      index = i;
+    }
+  }
+  if (maxDist <= epsilon || index === -1) {
+    return [first, last];
+  }
+  const left = simplifyPathRdp(points.slice(0, index + 1), epsilon);
+  const right = simplifyPathRdp(points.slice(index), epsilon);
+  return left.slice(0, -1).concat(right);
+}
+
+function simplifyClosedPolygon(points, epsilon) {
+  if (!points || points.length < 4) return points ? [...points] : [];
+  const open = [...points, points[0]];
+  const simplified = simplifyPathRdp(open, epsilon);
+  const unique = simplified.slice(0, -1);
+  if (unique.length >= 3) return unique;
+  return points.slice(0, Math.min(points.length, 12));
+}
+
+function removeBrushDraftPointsAround(point, radius) {
+  if (!state.brushDraftPoints.length) return false;
+  const cx = point.x;
+  const cy = point.y;
+  const kept = [];
+  let changed = false;
+  const rr = radius * radius;
+  for (const sample of state.brushDraftPoints) {
+    const dx = sample.x - cx;
+    const dy = sample.y - cy;
+    if (dx * dx + dy * dy <= rr) {
+      changed = true;
+      continue;
+    }
+    kept.push(sample);
+  }
+  if (changed) state.brushDraftPoints = kept;
+  return changed;
+}
+
+function circlePolygon(center, radius, segments = 20) {
   const points = [];
   for (let i = 0; i < segments; i++) {
     const a = (Math.PI * 2 * i) / segments;
@@ -1218,14 +1285,139 @@ function buildBrushPolygon(points, radius) {
   return left.concat(right.reverse());
 }
 
+function extractMarchingSquaresContours(binary, width, height) {
+  const segments = [];
+  const edgePoint = (x, y, edge) => {
+    if (edge === 0) return { x: x + 0.5, y };       // top
+    if (edge === 1) return { x: x + 1, y: y + 0.5 }; // right
+    if (edge === 2) return { x: x + 0.5, y: y + 1 }; // bottom
+    return { x, y: y + 0.5 };                        // left
+  };
+  const addSeg = (x, y, e1, e2) => {
+    segments.push([edgePoint(x, y, e1), edgePoint(x, y, e2)]);
+  };
+  for (let y = 0; y < height - 1; y++) {
+    for (let x = 0; x < width - 1; x++) {
+      const a = binary[y * width + x] ? 1 : 0;
+      const b = binary[y * width + (x + 1)] ? 1 : 0;
+      const c = binary[(y + 1) * width + (x + 1)] ? 1 : 0;
+      const d = binary[(y + 1) * width + x] ? 1 : 0;
+      const idx = (a << 3) | (b << 2) | (c << 1) | d;
+      switch (idx) {
+        case 0:
+        case 15:
+          break;
+        case 1: addSeg(x, y, 3, 2); break;
+        case 2: addSeg(x, y, 2, 1); break;
+        case 3: addSeg(x, y, 3, 1); break;
+        case 4: addSeg(x, y, 0, 1); break;
+        case 5: addSeg(x, y, 0, 3); addSeg(x, y, 2, 1); break;
+        case 6: addSeg(x, y, 0, 2); break;
+        case 7: addSeg(x, y, 0, 3); break;
+        case 8: addSeg(x, y, 0, 3); break;
+        case 9: addSeg(x, y, 0, 2); break;
+        case 10: addSeg(x, y, 0, 1); addSeg(x, y, 3, 2); break;
+        case 11: addSeg(x, y, 0, 1); break;
+        case 12: addSeg(x, y, 3, 1); break;
+        case 13: addSeg(x, y, 2, 1); break;
+        case 14: addSeg(x, y, 3, 2); break;
+        default:
+          break;
+      }
+    }
+  }
+  if (!segments.length) return [];
+
+  const key = (p) => `${Math.round(p.x * 2)}:${Math.round(p.y * 2)}`;
+  const adj = new Map();
+  for (const [p1, p2] of segments) {
+    const k1 = key(p1);
+    const k2 = key(p2);
+    if (!adj.has(k1)) adj.set(k1, []);
+    if (!adj.has(k2)) adj.set(k2, []);
+    adj.get(k1).push({ key: k2, point: p2 });
+    adj.get(k2).push({ key: k1, point: p1 });
+  }
+
+  const usedEdges = new Set();
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const contours = [];
+
+  for (const [startKey, neighbors] of adj.entries()) {
+    for (const n of neighbors) {
+      const ek = edgeKey(startKey, n.key);
+      if (usedEdges.has(ek)) continue;
+      const path = [];
+      let currentKey = startKey;
+      let nextKey = n.key;
+      let guard = 0;
+      while (guard++ < 100000) {
+        const curPt = currentKey.split(":");
+        path.push({ x: Number(curPt[0]) / 2, y: Number(curPt[1]) / 2 });
+        usedEdges.add(edgeKey(currentKey, nextKey));
+        const options = (adj.get(nextKey) || []).filter((o) => !usedEdges.has(edgeKey(nextKey, o.key)));
+        const prevKey = currentKey;
+        currentKey = nextKey;
+        if (!options.length) break;
+        const preferred = options.find((o) => o.key !== prevKey) || options[0];
+        nextKey = preferred.key;
+        if (currentKey === startKey) break;
+      }
+      if (path.length >= 3) contours.push(path);
+    }
+  }
+
+  return contours;
+}
+
+function buildBrushAreaBoundary(points, radius) {
+  if (!points.length) return [];
+  const maxDim = 640;
+  const scale = Math.min(1, maxDim / Math.max(annotationCanvas.width || 1, annotationCanvas.height || 1));
+  const w = Math.max(64, Math.floor((annotationCanvas.width || 1) * scale));
+  const h = Math.max(64, Math.floor((annotationCanvas.height || 1) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const c = canvas.getContext("2d");
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = "#ffffff";
+  const rr = Math.max(1, radius * scale);
+  for (const p of points) {
+    c.beginPath();
+    c.arc(p.x * scale, p.y * scale, rr, 0, Math.PI * 2);
+    c.fill();
+  }
+  const data = c.getImageData(0, 0, w, h).data;
+  const binary = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) binary[i] = data[i * 4 + 3] > 15 ? 1 : 0;
+  const contours = extractMarchingSquaresContours(binary, w, h);
+  if (!contours.length) return [];
+  let boundary = contours[0];
+  for (const cpath of contours) {
+    if (cpath.length > boundary.length) boundary = cpath;
+  }
+  const toCanvas = boundary.map((p) => clampToCanvasPoint({ x: p.x / scale, y: p.y / scale }));
+  return simplifyClosedPolygon(toCanvas, Math.max(3, state.brushSize * 0.55));
+}
+
 function commitBrushStrokeAsPolygon() {
-  if (!state.brushStrokePoints.length) return null;
+  if (!state.brushDraftPoints.length) return null;
   const radius = Math.max(2, state.brushSize / 2);
-  const points = buildBrushPolygon(state.brushStrokePoints, radius);
+  const isAreaClass = String(classSelect?.value || "").toLowerCase() !== "crack";
+  const centerline = simplifyPathRdp(state.brushDraftPoints, Math.max(3, state.brushSize * 0.72));
+  const points = isAreaClass
+    ? buildBrushAreaBoundary(state.brushDraftPoints, radius)
+    : simplifyClosedPolygon(
+        buildBrushPolygon(centerline, radius),
+        Math.max(3, state.brushSize * 0.6),
+      );
   if (points.length < 3) return null;
   const poly = prepareCommittedPolygon(points);
   poly.brush_generated = true;
+  poly.brush_centerline = centerline;
   state.finishedPolygons.push(poly);
+  state.brushDraftPoints = [];
   return poly;
 }
 
@@ -1589,8 +1781,19 @@ async function calculatePolygonArea(poly) {
     });
     const result = await response.json();
     // Update the polygon in-place with real-world value
-    poly.value = result.value;
-    poly.unit  = result.unit;
+    let value = result.value;
+    const unit = result.unit;
+    // Brush masks for crack are narrow closed polygons; backend computes perimeter,
+    // so approximate centerline length by halving the perimeter result.
+    if (
+      poly.brush_generated &&
+      String(poly.class_label || "").toLowerCase() === "crack" &&
+      typeof value === "number"
+    ) {
+      value = Math.round((value / 2) * 10000) / 10000;
+    }
+    poly.value = value;
+    poly.unit  = unit;
     redrawCanvas();
     queueAnnotationSave();
   } catch (err) {
@@ -1607,8 +1810,14 @@ annotationCanvas.addEventListener("mousedown", (e) => {
     state.brushStrokeActive = true;
     state.brushStrokePoints = [];
     state.brushLastPoint = null;
-    pushBrushSample(getCanvasPos(e));
-    if (state.eraserMode) maybeEraseBrushPolygons(getCanvasPos(e));
+    const point = getCanvasPos(e);
+    if (state.brushMode) {
+      pushBrushSample(point);
+    } else {
+      const erasedDraft = removeBrushDraftPointsAround(point, Math.max(2, state.brushSize / 2));
+      if (!erasedDraft) maybeEraseBrushPolygons(point);
+    }
+    updateAnnotationToolbar();
     redrawCanvas();
     return;
   }
@@ -1691,8 +1900,13 @@ annotationCanvas.addEventListener("mousemove", (e) => {
   }
   if ((state.brushMode || state.eraserMode) && state.brushStrokeActive) {
     const point = getCanvasPos(e);
-    pushBrushSample(point);
-    if (state.eraserMode) maybeEraseBrushPolygons(point);
+    if (state.brushMode) {
+      pushBrushSample(point);
+    } else {
+      const erasedDraft = removeBrushDraftPointsAround(point, Math.max(2, state.brushSize / 2));
+      if (!erasedDraft) maybeEraseBrushPolygons(point);
+    }
+    updateAnnotationToolbar();
     redrawCanvas();
     return;
   }
@@ -1722,15 +1936,9 @@ annotationCanvas.addEventListener("mousemove", (e) => {
 annotationCanvas.addEventListener("mouseup", () => {
   if (state.brushStrokeActive && (state.brushMode || state.eraserMode)) {
     state.brushStrokeActive = false;
-    if (state.brushMode) {
-      const committed = commitBrushStrokeAsPolygon();
-      if (committed) {
-        queueAnnotationSave();
-        calculatePolygonArea(committed);
-      }
-    }
     state.brushStrokePoints = [];
     state.brushLastPoint = null;
+    updateAnnotationToolbar();
     redrawCanvas();
     renderMaskSidebar();
     return;
@@ -1749,15 +1957,9 @@ annotationCanvas.addEventListener("mouseup", () => {
 window.addEventListener("mouseup", () => {
   if (state.brushStrokeActive && (state.brushMode || state.eraserMode)) {
     state.brushStrokeActive = false;
-    if (state.brushMode) {
-      const committed = commitBrushStrokeAsPolygon();
-      if (committed) {
-        queueAnnotationSave();
-        calculatePolygonArea(committed);
-      }
-    }
     state.brushStrokePoints = [];
     state.brushLastPoint = null;
+    updateAnnotationToolbar();
     redrawCanvas();
     renderMaskSidebar();
     return;
@@ -1798,6 +2000,8 @@ function updateAnnotationToolbar() {
   if (brushSizeValue) brushSizeValue.textContent = `${state.brushSize} px`;
   brushToolBtn?.classList.toggle("active", state.brushMode);
   eraserToolBtn?.classList.toggle("active", state.eraserMode);
+  if (brushConfirmBtn) brushConfirmBtn.disabled = state.brushDraftPoints.length < 3;
+  if (brushClearBtn) brushClearBtn.disabled = state.brushDraftPoints.length === 0;
 
   const sam2DraftActive = state.sam2Mode || hasPendingSam2Draft();
   if (sam2Controls) sam2Controls.style.display = sam2DraftActive ? "inline-flex" : "none";
@@ -2021,6 +2225,9 @@ function loadPolygonsForCurrentImage() {
   state.activeMaskId = null;
   state.hoverMaskId = null;
   state.activePredictionId = null;
+  state.brushDraftPoints = [];
+  state.brushStrokePoints = [];
+  state.brushLastPoint = null;
   if (image && image.polygons && image.polygons.length) {
     state.finishedPolygons = image.polygons.map((poly) => ({
       id: poly.id,
@@ -2832,6 +3039,33 @@ brushSizeInput?.addEventListener("input", () => {
   redrawCanvas();
 });
 
+brushConfirmBtn?.addEventListener("click", async () => {
+  try {
+    const committed = commitBrushStrokeAsPolygon();
+    if (!committed) {
+      showToast("Paint an area with brush first, then confirm.");
+      return;
+    }
+    queueAnnotationSave();
+    await calculatePolygonArea(committed);
+    updateAnnotationToolbar();
+    redrawCanvas();
+    renderMaskSidebar();
+    showToast("Brush mask confirmed.");
+  } catch (err) {
+    showToast(err.message);
+  }
+});
+
+brushClearBtn?.addEventListener("click", () => {
+  state.brushDraftPoints = [];
+  state.brushStrokePoints = [];
+  state.brushLastPoint = null;
+  updateAnnotationToolbar();
+  redrawCanvas();
+  showToast("Cleared brush draft.");
+});
+
 if (sam2ToolBtn) {
   sam2ToolBtn.addEventListener("click", () => {
     // Disabled state still receives clicks via JS — surface the hint.
@@ -2880,6 +3114,11 @@ correctionModeRedrawBtn?.addEventListener("click", () => setCorrectionMode("redr
 undoPolygonBtn.addEventListener("click", () => {
   if (state.sam2Mode || hasPendingSam2Draft()) {
     undoSam2Prompt();
+  } else if (state.brushDraftPoints.length > 0) {
+    const drop = Math.max(1, Math.ceil(state.brushSize * 0.5));
+    state.brushDraftPoints.splice(Math.max(0, state.brushDraftPoints.length - drop), drop);
+    updateAnnotationToolbar();
+    redrawCanvas();
   } else if (state.drawMode && state.currentPolygon.length > 0) {
     state.currentPolygon.pop();
     redrawCanvas();
@@ -2894,6 +3133,15 @@ undoPolygonBtn.addEventListener("click", () => {
 clearPolygonsBtn.addEventListener("click", () => {
   if (state.sam2Mode || hasPendingSam2Draft()) {
     clearSam2Prompts();
+    return;
+  }
+  if (state.brushDraftPoints.length > 0) {
+    state.brushDraftPoints = [];
+    state.brushStrokePoints = [];
+    state.brushLastPoint = null;
+    updateAnnotationToolbar();
+    redrawCanvas();
+    showToast("Cleared brush draft.");
     return;
   }
   exitDrawMode();
