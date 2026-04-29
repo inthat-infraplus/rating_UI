@@ -27,7 +27,8 @@ body {
 }
 
 .app-shell {
-  max-width: 1600px;
+  max-width: none;
+  width: 100%;
 }
 
 .hero-panel,
@@ -370,7 +371,7 @@ body {
 
 .review-layout {
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
+  grid-template-columns: 340px minmax(0, 1fr);
   gap: 1.5rem;
 }
 
@@ -534,7 +535,7 @@ body {
   flex-direction: column;
   gap: 1.25rem;
   padding: 1.5rem;
-  min-height: 72vh;
+  min-height: calc(100vh - 150px);
 }
 
 .viewer-topbar {
@@ -621,7 +622,7 @@ body {
 /* ── Image stage + canvas stack ───────────────────────────────────────────── */
 .image-stage {
   position: relative;
-  min-height: 52vh;
+  min-height: clamp(62vh, 74vh, 84vh);
   border-radius: 24px;
   border: 1px dashed rgba(7, 59, 76, 0.2);
   background:
@@ -630,13 +631,13 @@ body {
   overflow: auto;
   display: flex;
   align-items: flex-start;
-  justify-content: center;
-  padding: 1rem;
+  justify-content: flex-start;
+  padding: 0.6rem;
 }
 
 .viewer-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 280px;
   gap: 1rem;
   align-items: stretch;
 }
@@ -646,6 +647,16 @@ body {
   display: inline-block;
   line-height: 0;
   flex: 0 0 auto;
+  margin: 0 auto;
+}
+
+.image-stage.pan-ready {
+  cursor: grab;
+}
+
+.image-stage.pan-active {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .image-canvas-wrap img {
@@ -1345,7 +1356,7 @@ kbd {
 }
 
 .app-nav-inner {
-  max-width: 1400px;
+  max-width: none;
   margin: 0 auto;
   padding: 0.75rem 1.5rem;
   display: flex;

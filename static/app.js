@@ -19,6 +19,12 @@ const state = {
   viewerZoom: 1,
   baseImageWidth: 0,
   baseImageHeight: 0,
+  spacePan: false,
+  isPanning: false,
+  panStartX: 0,
+  panStartY: 0,
+  panScrollLeft: 0,
+  panScrollTop: 0,
   // annotation
   drawMode: false,
   brushMode: false,
@@ -357,6 +363,11 @@ function updateZoomLabel() {
   if (zoomValueLabel) zoomValueLabel.textContent = `${Math.round(state.viewerZoom * 100)}%`;
 }
 
+function setPanCursor(active) {
+  if (!imageStage) return;
+  imageStage.classList.toggle("pan-active", active);
+}
+
 function applyViewerZoom() {
   if (!mainImage.naturalWidth || !mainImage.naturalHeight) return;
   const availableWidth = Math.max(240, imageStage.clientWidth - 32);
@@ -374,9 +385,22 @@ function applyViewerZoom() {
   updateZoomLabel();
 }
 
-function setViewerZoom(nextZoom) {
+function setViewerZoom(nextZoom, anchor = null) {
+  const prevWidth = Math.max(1, imageCanvasWrap.offsetWidth || 1);
+  const prevHeight = Math.max(1, imageCanvasWrap.offsetHeight || 1);
+  const stageRect = imageStage.getBoundingClientRect();
+  const anchorX = anchor?.x ?? stageRect.width / 2;
+  const anchorY = anchor?.y ?? stageRect.height / 2;
+  const relX = (imageStage.scrollLeft + anchorX) / prevWidth;
+  const relY = (imageStage.scrollTop + anchorY) / prevHeight;
+
   state.viewerZoom = clampZoom(nextZoom);
   applyViewerZoom();
+
+  const newWidth = Math.max(1, imageCanvasWrap.offsetWidth || 1);
+  const newHeight = Math.max(1, imageCanvasWrap.offsetHeight || 1);
+  imageStage.scrollLeft = Math.max(0, relX * newWidth - anchorX);
+  imageStage.scrollTop = Math.max(0, relY * newHeight - anchorY);
 }
 
 // ── Overlay sizing ───────────────────────────────────────────────────────────
@@ -2817,6 +2841,48 @@ const resizeObserver = new ResizeObserver(() => {
 });
 resizeObserver.observe(imageStage);
 
+imageStage.addEventListener("wheel", (event) => {
+  if (!mainImage.naturalWidth) return;
+  // Keep default scroll unless user intentionally zooms with Ctrl/Cmd
+  if (!(event.ctrlKey || event.metaKey)) return;
+  event.preventDefault();
+  const rect = imageStage.getBoundingClientRect();
+  const anchor = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+  const delta = event.deltaY < 0 ? 0.2 : -0.2;
+  setViewerZoom(state.viewerZoom + delta, anchor);
+}, { passive: false });
+
+imageStage.addEventListener("mousedown", (event) => {
+  const canPan = state.viewerZoom > 1 && !state.drawMode && !state.sam2Mode && !state.brushMode && !state.eraserMode;
+  const bySpace = event.button === 0 && state.spacePan;
+  const byMiddle = event.button === 1;
+  if (!canPan || (!bySpace && !byMiddle)) return;
+  event.preventDefault();
+  state.isPanning = true;
+  state.panStartX = event.clientX;
+  state.panStartY = event.clientY;
+  state.panScrollLeft = imageStage.scrollLeft;
+  state.panScrollTop = imageStage.scrollTop;
+  setPanCursor(true);
+});
+
+window.addEventListener("mousemove", (event) => {
+  if (!state.isPanning) return;
+  const dx = event.clientX - state.panStartX;
+  const dy = event.clientY - state.panStartY;
+  imageStage.scrollLeft = state.panScrollLeft - dx;
+  imageStage.scrollTop = state.panScrollTop - dy;
+});
+
+window.addEventListener("mouseup", () => {
+  if (!state.isPanning) return;
+  state.isPanning = false;
+  setPanCursor(false);
+});
+
 // ── Event listeners ──────────────────────────────────────────────────────────
 chooseFolderBtn.addEventListener("click", async () => {
   try { await chooseFolder(); } catch (err) { showToast(err.message); }
@@ -3214,6 +3280,13 @@ bboxToggle.addEventListener("change", () => renderBboxOverlay());
 window.addEventListener("keydown", async (event) => {
   const activeElement = document.activeElement;
   if (activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(activeElement.tagName)) return;
+  if (event.code === "Space" && !event.repeat) {
+    state.spacePan = true;
+    if (state.viewerZoom > 1 && !state.drawMode && !state.sam2Mode && !state.brushMode && !state.eraserMode) {
+      imageStage.classList.add("pan-ready");
+      event.preventDefault();
+    }
+  }
 
   try {
     if (event.key === "Escape") {
@@ -3292,6 +3365,20 @@ window.addEventListener("keydown", async (event) => {
   } catch (err) {
     showToast(err.message);
   }
+});
+
+window.addEventListener("keyup", (event) => {
+  if (event.code !== "Space") return;
+  state.spacePan = false;
+  imageStage.classList.remove("pan-ready");
+  if (!state.isPanning) setPanCursor(false);
+});
+
+window.addEventListener("blur", () => {
+  state.spacePan = false;
+  state.isPanning = false;
+  imageStage.classList.remove("pan-ready");
+  setPanCursor(false);
 });
 
 // ── Task-detail mode init ────────────────────────────────────────────────────
