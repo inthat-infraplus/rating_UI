@@ -20,6 +20,8 @@ from urllib.parse import urlsplit, urlunsplit
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from .db_migrations import initialize_database
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -69,15 +71,16 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    """Create tables if they don't exist. Safe to call repeatedly."""
+    """Initialize the database without rebuilding existing schema/data."""
     # Import models so they register on Base.metadata
     from . import models_db  # noqa: F401
 
+    sqlite_path: Path | None = None
     if IS_SQLITE:
         sqlite_path = Path(DB_URL.replace("sqlite:///", "", 1))
         sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 
-    Base.metadata.create_all(engine)
+    initialize_database(engine, Base.metadata, sqlite_path=sqlite_path)
 
 
 def ensure_postgres_database() -> bool:

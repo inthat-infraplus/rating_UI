@@ -164,10 +164,11 @@ def _simplify_polygon(points_xy, eps_norm: float, w: int, h: int):
     return simplified if len(simplified) >= _MIN_POLYGON_VERTICES else points_xy
 
 
-def segment_at_points(
+def segment_with_prompts(
     image_path: str | Path,
     points_norm: list[tuple[float, float]],
     labels: list[int] | None = None,
+    box_norm: tuple[float, float, float, float] | None = None,
     *,
     image_natural_width: int | None = None,
     image_natural_height: int | None = None,
@@ -184,8 +185,8 @@ def segment_at_points(
     import time
     from PIL import Image
 
-    if not points_norm:
-        raise ValueError("At least one click point is required.")
+    if not points_norm and box_norm is None:
+        raise ValueError("At least one point or box prompt is required.")
     if labels is None:
         labels = [1] * len(points_norm)
     if len(labels) != len(points_norm):
@@ -205,11 +206,25 @@ def segment_at_points(
 
     # Convert normalized clicks to pixel coords for ultralytics.
     px_points = [[float(p[0]) * w, float(p[1]) * h] for p in points_norm]
+    px_box = None
+    if box_norm is not None:
+        x1, y1, x2, y2 = box_norm
+        left, right = sorted((float(x1) * w, float(x2) * w))
+        top, bottom = sorted((float(y1) * h, float(y2) * h))
+        if right - left < 1 or bottom - top < 1:
+            raise ValueError("Box prompt must have non-zero width and height.")
+        px_box = [[left, top, right, bottom]]
 
     model = _load_model()
     t0 = time.perf_counter()
-    # Ultralytics SAM signature: model(source, points=[[x, y], ...], labels=[1, 0, ...])
-    results = model(str(img_path), points=px_points, labels=labels, verbose=False)
+    # Ultralytics SAM signature supports point prompts and/or bounding boxes.
+    results = model(
+        str(img_path),
+        points=px_points or None,
+        labels=labels if px_points else None,
+        bboxes=px_box,
+        verbose=False,
+    )
     duration_ms = int((time.perf_counter() - t0) * 1000)
 
     polygons: list[Sam2Polygon] = []
@@ -236,4 +251,24 @@ def segment_at_points(
         polygons=polygons,
         duration_ms=duration_ms,
         model_path=str(model_path()),
+    )
+
+
+def segment_at_points(
+    image_path: str | Path,
+    points_norm: list[tuple[float, float]],
+    labels: list[int] | None = None,
+    *,
+    image_natural_width: int | None = None,
+    image_natural_height: int | None = None,
+    simplify_eps: float = _DEFAULT_SIMPLIFY_EPS,
+) -> Sam2Result:
+    """Backward-compatible wrapper for point-only callers."""
+    return segment_with_prompts(
+        image_path,
+        points_norm,
+        labels,
+        image_natural_width=image_natural_width,
+        image_natural_height=image_natural_height,
+        simplify_eps=simplify_eps,
     )

@@ -543,6 +543,26 @@ body {
   gap: 0.75rem;
   flex: 0 0 auto;
   align-self: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f6fafc;
+}
+
+.zoom-value {
+  min-width: 3.25rem;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #18313f;
 }
 
 /* ── Bbox toggle row ──────────────────────────────────────────────────────── */
@@ -582,22 +602,31 @@ body {
   background:
     linear-gradient(135deg, rgba(7, 59, 76, 0.05), rgba(78, 205, 196, 0.06)),
     #f9fcfd;
-  overflow: hidden;
+  overflow: auto;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding: 1rem;
+}
+
+.viewer-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 1rem;
+  align-items: stretch;
 }
 
 .image-canvas-wrap {
   position: relative;
   display: inline-block;
   line-height: 0;
+  flex: 0 0 auto;
 }
 
 .image-canvas-wrap img {
   display: block;
-  max-width: 100%;
-  max-height: 52vh;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   user-select: none;
   -webkit-user-drag: none;
@@ -640,6 +669,44 @@ body {
   border-color: #5b21b6;
 }
 
+.sam2-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 12px;
+  background: rgba(91, 33, 182, 0.08);
+  border: 1px solid rgba(91, 33, 182, 0.16);
+}
+
+.sam2-controls-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5b21b6;
+}
+
+.sam2-prompt-toggle .btn.active {
+  color: #fff;
+}
+
+.sam2-prompt-source .btn.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+#sam2-positive-btn.active {
+  background: #159947;
+  border-color: #159947;
+}
+
+#sam2-negative-btn.active {
+  background: #d64545;
+  border-color: #d64545;
+}
+
 #sam2-tool-btn.loading {
   position: relative;
   pointer-events: none;
@@ -673,10 +740,234 @@ body {
   font-weight: 600;
 }
 
+.annot-hint-sam2-live {
+  color: #9a3412;
+  font-weight: 700;
+}
+
+.sam2-prompt-count {
+  color: #5b21b6;
+}
+
 .empty-stage {
   padding: 2rem;
   text-align: center;
   color: var(--muted);
+}
+
+.mask-sidebar {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #fbfcfd;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 52vh;
+  max-height: 52vh;
+}
+
+.correction-mode-panel,
+.prediction-sidebar {
+  border: 1px solid rgba(24, 49, 63, 0.08);
+  border-radius: 16px;
+  padding: 0.85rem;
+  background: #fff;
+  margin-bottom: 0.8rem;
+}
+
+.correction-mode-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+
+.correction-mode-actions .btn.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+.prediction-sidebar.locked {
+  opacity: 0.58;
+}
+
+.prediction-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.prediction-item {
+  border: 1px solid rgba(24, 49, 63, 0.08);
+  border-radius: 14px;
+  padding: 0.7rem;
+  background: #fbfcfd;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.prediction-item.active {
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.prediction-item.locked {
+  background: #f3f5f7;
+}
+
+.prediction-title {
+  font-weight: 700;
+  color: #18313f;
+}
+
+.prediction-subtitle {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 0.18rem;
+}
+
+.prediction-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.prediction-action-btn {
+  border: 1px solid rgba(24, 49, 63, 0.12);
+  background: #fff;
+  color: #324958;
+  border-radius: 10px;
+  padding: 0.42rem 0.3rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.prediction-action-btn.active {
+  background: #18313f;
+  color: #fff;
+  border-color: #18313f;
+}
+
+.mask-sidebar-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.mask-sidebar-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #7c3aed;
+}
+
+.mask-sidebar-title {
+  margin: 0.15rem 0 0;
+  font-size: 1rem;
+}
+
+.mask-sidebar-count {
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+  font-weight: 700;
+}
+
+.mask-sidebar-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin-bottom: 0.8rem;
+}
+
+.mask-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.mask-list-item {
+  border: 1px solid rgba(24, 49, 63, 0.08);
+  border-radius: 16px;
+  padding: 0.75rem 0.8rem;
+  background: #fff;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  align-items: center;
+  cursor: pointer;
+}
+
+.mask-list-item.active {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.mask-list-item.hidden {
+  opacity: 0.58;
+}
+
+.mask-list-main {
+  min-width: 0;
+}
+
+.mask-list-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: #18313f;
+}
+
+.mask-color-dot {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.mask-list-subtitle {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 0.18rem;
+}
+
+.mask-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.mask-icon-btn {
+  border: 1px solid rgba(24, 49, 63, 0.1);
+  background: #fff;
+  color: #324958;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mask-icon-btn:hover {
+  background: #f4f7fa;
+}
+
+.mask-icon-btn.mask-delete:hover {
+  background: #fde8e5;
+  color: #c44536;
 }
 
 /* ── Annotation toolbar ───────────────────────────────────────────────────── */
@@ -819,6 +1110,7 @@ kbd {
     padding: 1.25rem 1.5rem;
   }
 
+  .viewer-workspace,
   .review-layout,
   .hero-panel {
     grid-template-columns: 1fr;

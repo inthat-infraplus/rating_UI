@@ -21,4 +21,4 @@ models/
 *.pt
 *.pth
 *.onnx
-
+sam3-git/

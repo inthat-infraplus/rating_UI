@@ -8,3 +8,9 @@ SQLAlchemy>=2.0,<3
 passlib[bcrypt]>=1.7,<2
 bcrypt>=4.0,<4.1   # passlib 1.7.4 is incompatible with bcrypt 4.1+ (noisy warning)
 itsdangerous>=2.2,<3
+httpx>=0.28,<1      # FastAPI/Starlette TestClient dependency for smoke tests
+timm>=1.0.17
+ftfy==6.1.1
+iopath>=0.1.10
+einops>=0.8,<1
+pycocotools>=2.0.11

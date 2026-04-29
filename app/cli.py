@@ -12,11 +12,13 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
+from pathlib import Path
 
 from sqlalchemy import select
 
 from .auth import hash_password
-from .db import db_session, init_db
+from .db import DB_URL, IS_SQLITE, db_session, init_db
+from .db_migrations import create_sqlite_snapshot, list_snapshots, restore_sqlite_snapshot
 from .models_db import User, UserRole
 
 
@@ -35,6 +37,44 @@ def _prompt_password() -> str:
 def cmd_init_db(_args: argparse.Namespace) -> int:
     init_db()
     print("DB initialized.")
+    return 0
+
+
+def _sqlite_path() -> Path:
+    if not IS_SQLITE:
+        raise RuntimeError("This snapshot command currently supports SQLite only.")
+    return Path(DB_URL.replace("sqlite:///", "", 1)).resolve()
+
+
+def cmd_db_status(_args: argparse.Namespace) -> int:
+    init_db()
+    if IS_SQLITE:
+        db_path = _sqlite_path()
+        print(f"DB: {db_path}")
+        snapshots = list_snapshots(db_path)
+        print(f"Snapshots: {len(snapshots)}")
+        if snapshots:
+            print(f"Latest snapshot: {snapshots[0]}")
+    else:
+        print(f"DB: {DB_URL}")
+        print("Snapshots: automatic SQLite snapshots only")
+    return 0
+
+
+def cmd_snapshot_db(args: argparse.Namespace) -> int:
+    db_path = _sqlite_path()
+    if not db_path.exists():
+        init_db()
+    snapshot = create_sqlite_snapshot(db_path, label=args.label or "manual")
+    print(f"Created snapshot: {snapshot}")
+    return 0
+
+
+def cmd_restore_db(args: argparse.Namespace) -> int:
+    db_path = _sqlite_path()
+    snapshot = Path(args.snapshot).expanduser().resolve()
+    restore_sqlite_snapshot(db_path, snapshot)
+    print(f"Restored database from snapshot: {snapshot}")
     return 0
 
 
@@ -93,6 +133,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("init-db", help="Create database tables.").set_defaults(func=cmd_init_db)
+    sub.add_parser("db-status", help="Show database path and snapshot status.").set_defaults(func=cmd_db_status)
+
+    p_snapshot = sub.add_parser("snapshot-db", help="Create a manual SQLite DB snapshot.")
+    p_snapshot.add_argument("--label", default="manual")
+    p_snapshot.set_defaults(func=cmd_snapshot_db)
+
+    p_restore = sub.add_parser("restore-db", help="Restore the SQLite DB from a snapshot.")
+    p_restore.add_argument("--snapshot", required=True)
+    p_restore.set_defaults(func=cmd_restore_db)
 
     p_create = sub.add_parser("create-user", help="Create a new user.")
     p_create.add_argument("--username", required=True)

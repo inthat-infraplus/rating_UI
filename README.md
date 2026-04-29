@@ -24,6 +24,24 @@ python -m app.cli create-user --username admin --role L1 --display-name "Admin"
 python -m app.cli create-user --username alice --role L2 --display-name "Alice"
 ```
 
+### Safe schema updates and rollback
+
+The app now tracks schema version changes instead of rebuilding the database on
+startup. Existing databases are stamped in place, and future updates run only
+the missing migrations.
+
+For the default SQLite deployment:
+
+- Every schema migration creates a snapshot in `./db_snapshots/` before it runs.
+- If a migration fails, the app restores the last snapshot automatically.
+- You can also create and restore snapshots manually:
+
+```powershell
+python -m app.cli db-status
+python -m app.cli snapshot-db --label before_change
+python -m app.cli restore-db --snapshot .\db_snapshots\<snapshot-file>.db
+```
+
 Then run the app and sign in at `/login`:
 
 ```powershell

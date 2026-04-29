@@ -3,19 +3,41 @@ const state = {
   session: null,
   activeFilter: "unreviewed",
   currentRelativePath: null,
+  correctionMode: "patch",
+  predictionActions: {},
+  activePredictionId: null,
   toastTimer: null,
   uiSaveTimer: null,
   targetSaveTimer: null,
+  targetSavePending: false,
+  taskActionsBound: false,
+  taskInitPending: false,
+  viewerZoom: 1,
+  baseImageWidth: 0,
+  baseImageHeight: 0,
   // annotation
   drawMode: false,
   currentPolygon: [],      // [{x, y}] canvas-pixel coords, in-progress
   finishedPolygons: [],    // [{id, class_label, points:[{x,y}]}] canvas-pixel coords
+  activeMaskId: null,
+  maskUiByImage: {},       // { [relativePath]: { [maskId]: { visible: bool } } }
   annotationSaveTimer: null,
   mousePt: null,           // {x, y} canvas-pixel, for preview line
   // SAM2 AI-assist
   sam2Mode: false,         // true while user is in click-to-segment mode
   sam2Available: false,    // updated from /api/sam2/status on page load
   sam2Pending: false,      // throttle: ignore clicks while a request is in flight
+  sam2PromptType: "positive",
+  sam2PromptSource: "point",
+  sam2Points: [],          // [{x, y, label}] normalized 0..1 coords
+  sam2Box: null,           // {x1,y1,x2,y2} normalized 0..1 coords
+  sam2PreviewPolygons: [], // [{points:[{x,y}]}] normalized 0..1 coords, not yet committed
+  sam2InferenceTimer: null,
+  sam2NeedsRerun: false,
+  sam2DraggingIndex: -1,
+  sam2SuppressClick: false,
+  sam2BoxDraftStart: null,
+  sam2BoxDraftCurrent: null,
 };
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -39,6 +61,10 @@ const queueMeta              = document.getElementById("queue-meta");
 const queueList              = document.getElementById("queue-list");
 const viewerTitle            = document.getElementById("viewer-title");
 const viewerSubtitle         = document.getElementById("viewer-subtitle");
+const zoomOutBtn             = document.getElementById("zoom-out-btn");
+const zoomResetBtn           = document.getElementById("zoom-reset-btn");
+const zoomInBtn              = document.getElementById("zoom-in-btn");
+const zoomValueLabel         = document.getElementById("zoom-value");
 const mainImage              = document.getElementById("main-image");
 const imageStage             = document.getElementById("image-stage");
 const imageCanvasWrap        = document.getElementById("image-canvas-wrap");
@@ -58,11 +84,31 @@ const annotationToolbar      = document.getElementById("annotation-toolbar");
 const classSelect            = document.getElementById("class-select");
 const drawPolygonBtn         = document.getElementById("draw-polygon-btn");
 const sam2ToolBtn            = document.getElementById("sam2-tool-btn");
+const sam2Controls           = document.getElementById("sam2-controls");
+const sam2PointModeBtn       = document.getElementById("sam2-point-mode-btn");
+const sam2BoxModeBtn         = document.getElementById("sam2-box-mode-btn");
+const sam2PositiveBtn        = document.getElementById("sam2-positive-btn");
+const sam2NegativeBtn        = document.getElementById("sam2-negative-btn");
+const sam2UndoBtn            = document.getElementById("sam2-undo-btn");
+const sam2ClearBtn           = document.getElementById("sam2-clear-btn");
+const sam2ConfirmBtn         = document.getElementById("sam2-confirm-btn");
 const undoPolygonBtn         = document.getElementById("undo-polygon-btn");
 const clearPolygonsBtn       = document.getElementById("clear-polygons-btn");
+const deleteSelectedMaskBtn  = document.getElementById("delete-selected-mask-btn");
 const polygonCountLabel      = document.getElementById("polygon-count");
 const annotHint              = document.getElementById("annot-hint");
 const annotHintSam2          = document.getElementById("annot-hint-sam2");
+const annotHintSam2Live      = document.getElementById("annot-hint-sam2-live");
+const sam2PromptCountLabel   = document.getElementById("sam2-prompt-count");
+const maskSidebar            = document.getElementById("mask-sidebar");
+const maskSidebarCount       = document.getElementById("mask-sidebar-count");
+const maskSidebarMeta        = document.getElementById("mask-sidebar-meta");
+const maskList               = document.getElementById("mask-list");
+const correctionModePatchBtn = document.getElementById("correction-mode-patch-btn");
+const correctionModeRedrawBtn = document.getElementById("correction-mode-redraw-btn");
+const predictionSidebar      = document.getElementById("prediction-sidebar");
+const predictionSidebarMeta  = document.getElementById("prediction-sidebar-meta");
+const predictionList         = document.getElementById("prediction-list");
 // bbox controls
 const bboxToggleRow          = document.getElementById("bbox-toggle-row");
 const bboxToggle             = document.getElementById("bbox-toggle");
@@ -142,6 +188,40 @@ function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+function currentMaskUiMap() {
+  const key = state.currentRelativePath || "__none__";
+  if (!state.maskUiByImage[key]) state.maskUiByImage[key] = {};
+  return state.maskUiByImage[key];
+}
+
+function computePolygonBBox(points) {
+  if (!points.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  let minX = points[0].x;
+  let minY = points[0].y;
+  let maxX = points[0].x;
+  let maxY = points[0].y;
+  for (let i = 1; i < points.length; i++) {
+    const point = points[i];
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+function pointInPolygon(pt, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    const intersect = ((yi > pt.y) !== (yj > pt.y))
+      && (pt.x < ((xj - xi) * (pt.y - yi)) / ((yj - yi) || 1e-9) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 // ── Filter helpers ───────────────────────────────────────────────────────────
 function filterImages(images, filterMode) {
   if (filterMode === "reviewed")   return images.filter((i) => i.reviewed);
@@ -162,6 +242,25 @@ function currentImage() {
   return images.find((i) => i.relative_path === state.currentRelativePath) || images[0];
 }
 
+function syncImageCorrectionState() {
+  const image = currentImage();
+  if (!image) {
+    state.correctionMode = "patch";
+    state.predictionActions = {};
+    state.activePredictionId = null;
+    return;
+  }
+  state.correctionMode = image.correction_mode === "redraw_all" ? "redraw_all" : "patch";
+  const actions = {};
+  for (const box of image.prediction_boxes || []) {
+    actions[String(box.object_id)] = box.action || "keep";
+  }
+  state.predictionActions = actions;
+  if (state.activePredictionId && !(String(state.activePredictionId) in actions)) {
+    state.activePredictionId = null;
+  }
+}
+
 // ── Coordinate helpers ───────────────────────────────────────────────────────
 function canvasToNorm(cx, cy) {
   return { x: cx / annotationCanvas.width, y: cy / annotationCanvas.height };
@@ -177,6 +276,44 @@ function getCanvasPos(e) {
     x: (e.clientX - rect.left) * (annotationCanvas.width / rect.width),
     y: (e.clientY - rect.top) * (annotationCanvas.height / rect.height),
   };
+}
+
+function normalizedCanvasPoint(point) {
+  return normToCanvas(point.x, point.y);
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function clampZoom(value) {
+  return Math.max(1, Math.min(4, Number(value) || 1));
+}
+
+function updateZoomLabel() {
+  if (zoomValueLabel) zoomValueLabel.textContent = `${Math.round(state.viewerZoom * 100)}%`;
+}
+
+function applyViewerZoom() {
+  if (!mainImage.naturalWidth || !mainImage.naturalHeight) return;
+  const availableWidth = Math.max(240, imageStage.clientWidth - 32);
+  const availableHeight = Math.max(240, imageStage.clientHeight - 32);
+  const fitScale = Math.min(
+    availableWidth / mainImage.naturalWidth,
+    availableHeight / mainImage.naturalHeight,
+  );
+  const safeScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
+  state.baseImageWidth = Math.max(1, Math.round(mainImage.naturalWidth * safeScale));
+  state.baseImageHeight = Math.max(1, Math.round(mainImage.naturalHeight * safeScale));
+  imageCanvasWrap.style.width = `${Math.round(state.baseImageWidth * state.viewerZoom)}px`;
+  imageCanvasWrap.style.height = `${Math.round(state.baseImageHeight * state.viewerZoom)}px`;
+  syncOverlaySize();
+  updateZoomLabel();
+}
+
+function setViewerZoom(nextZoom) {
+  state.viewerZoom = clampZoom(nextZoom);
+  applyViewerZoom();
 }
 
 // ── Overlay sizing ───────────────────────────────────────────────────────────
@@ -199,6 +336,7 @@ function syncOverlaySize() {
       points: poly.points.map((p) => normToCanvas(p.x, p.y)),
       value: poly.value ?? null,
       unit: poly.unit || "",
+      bbox: computePolygonBBox(poly.points.map((p) => normToCanvas(p.x, p.y))),
     }));
   }
 
@@ -358,14 +496,326 @@ function drawPolygonBadge(cx, cy, classLabel, value, unit, accentColor) {
   ctx.textBaseline = "alphabetic";
 }
 
+function hasPendingSam2Draft() {
+  return state.sam2Points.length > 0 || state.sam2PreviewPolygons.length > 0 || state.sam2Pending;
+}
+
+function resetSam2Draft() {
+  window.clearTimeout(state.sam2InferenceTimer);
+  state.sam2Points = [];
+  state.sam2Box = null;
+  state.sam2PreviewPolygons = [];
+  state.sam2NeedsRerun = false;
+  state.sam2DraggingIndex = -1;
+  state.sam2SuppressClick = false;
+  state.sam2BoxDraftStart = null;
+  state.sam2BoxDraftCurrent = null;
+}
+
+function ensureNoPendingSam2Draft(actionLabel = "continue") {
+  if (!hasPendingSam2Draft()) return true;
+  const ok = window.confirm(
+    `You have an unconfirmed SAM3 preview. Discard it and ${actionLabel}?`
+  );
+  if (!ok) return false;
+  resetSam2Draft();
+  redrawCanvas();
+  updateAnnotationToolbar();
+  return true;
+}
+
+function drawSam2PromptMarker(point, index) {
+  const canvasPt = normalizedCanvasPoint(point);
+  const isPositive = point.label === 1;
+  const fill = isPositive ? "#16a34a" : "#dc2626";
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(canvasPt.x, canvasPt.y, 9, 0, Math.PI * 2);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#ffffff";
+  ctx.stroke();
+
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2.25;
+  ctx.beginPath();
+  ctx.moveTo(canvasPt.x - 4, canvasPt.y);
+  ctx.lineTo(canvasPt.x + 4, canvasPt.y);
+  if (isPositive) {
+    ctx.moveTo(canvasPt.x, canvasPt.y - 4);
+    ctx.lineTo(canvasPt.x, canvasPt.y + 4);
+  }
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(canvasPt.x, canvasPt.y, 14, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.font = "600 10px 'Segoe UI', sans-serif";
+  ctx.fillStyle = "rgba(15,20,28,0.86)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(String(index + 1), canvasPt.x, canvasPt.y - 16);
+  ctx.restore();
+}
+
+function currentSam2BoxDraft() {
+  if (!state.sam2BoxDraftStart || !state.sam2BoxDraftCurrent) return null;
+  const start = state.sam2BoxDraftStart;
+  const end = state.sam2BoxDraftCurrent;
+  return {
+    x1: Math.min(start.x, end.x),
+    y1: Math.min(start.y, end.y),
+    x2: Math.max(start.x, end.x),
+    y2: Math.max(start.y, end.y),
+  };
+}
+
+function polygonUi(poly) {
+  return currentMaskUiMap()[poly.id] || { visible: true };
+}
+
+function isPolygonVisible(poly) {
+  return polygonUi(poly).visible !== false;
+}
+
+function selectMask(maskId) {
+  state.activeMaskId = maskId;
+  updateAnnotationToolbar();
+  redrawCanvas();
+  renderMaskSidebar();
+}
+
+function hitTestFinishedMask(canvasPt) {
+  for (let i = state.finishedPolygons.length - 1; i >= 0; i--) {
+    const poly = state.finishedPolygons[i];
+    if (!isPolygonVisible(poly) || !poly.points || poly.points.length < 3) continue;
+    const bbox = poly.bbox || computePolygonBBox(poly.points);
+    if (
+      canvasPt.x < bbox.minX || canvasPt.x > bbox.maxX ||
+      canvasPt.y < bbox.minY || canvasPt.y > bbox.maxY
+    ) {
+      continue;
+    }
+    if (pointInPolygon(canvasPt, poly.points)) return poly.id;
+  }
+  return null;
+}
+
+function deleteSelectedMask() {
+  if (!state.activeMaskId) return;
+  const targetId = state.activeMaskId;
+  const targetPoly = state.finishedPolygons.find((poly) => poly.id === targetId);
+  if (targetPoly && targetPoly.merge_action === "replace" && targetPoly.source_object_id !== null) {
+    state.predictionActions[String(targetPoly.source_object_id)] = "keep";
+  }
+  state.finishedPolygons = state.finishedPolygons.filter((poly) => poly.id !== targetId);
+  const uiMap = currentMaskUiMap();
+  delete uiMap[targetId];
+  state.activeMaskId = null;
+  updateAnnotationToolbar();
+  redrawCanvas();
+  renderMaskSidebar();
+  queueAnnotationSave();
+}
+
+function toggleMaskVisibility(maskId) {
+  const uiMap = currentMaskUiMap();
+  const current = uiMap[maskId] || { visible: true };
+  uiMap[maskId] = { ...current, visible: current.visible === false };
+  if (state.activeMaskId === maskId && uiMap[maskId].visible === false) {
+    state.activeMaskId = null;
+  }
+  updateAnnotationToolbar();
+  redrawCanvas();
+  renderMaskSidebar();
+}
+
+function predictionActionFor(objectId) {
+  return state.predictionActions[String(objectId)] || "keep";
+}
+
+function linkedMaskForPrediction(objectId) {
+  return state.finishedPolygons.find(
+    (poly) => poly.merge_action === "replace" && String(poly.source_object_id) === String(objectId),
+  ) || null;
+}
+
+function setCorrectionMode(mode) {
+  state.correctionMode = mode === "redraw_all" ? "redraw_all" : "patch";
+  if (state.correctionMode === "redraw_all") {
+    state.activePredictionId = null;
+  }
+  updateAnnotationToolbar();
+  redrawCanvas();
+  renderMaskSidebar();
+  queueAnnotationSave();
+}
+
+function removeReplacementMask(objectId) {
+  const objectKey = String(objectId);
+  const removedIds = new Set();
+  state.finishedPolygons = state.finishedPolygons.filter((poly) => {
+    const isMatch = poly.merge_action === "replace" && String(poly.source_object_id) === objectKey;
+    if (isMatch) removedIds.add(poly.id);
+    return !isMatch;
+  });
+  if (state.activeMaskId && removedIds.has(state.activeMaskId)) {
+    state.activeMaskId = null;
+  }
+}
+
+function setPredictionAction(objectId, action) {
+  const objectKey = String(objectId);
+  const nextAction = action === "replace" ? "replace" : action === "delete" ? "delete" : "keep";
+  state.predictionActions[objectKey] = nextAction;
+  if (nextAction !== "replace") {
+    removeReplacementMask(objectId);
+  } else {
+    state.activePredictionId = objectKey;
+  }
+  updateAnnotationToolbar();
+  redrawCanvas();
+  renderMaskSidebar();
+  queueAnnotationSave();
+}
+
+function renderMaskSidebar() {
+  if (!maskSidebar || !maskList || !maskSidebarMeta || !maskSidebarCount) return;
+  const image = currentImage();
+  const show = Boolean(image && image.decision === "wrong");
+  maskSidebar.style.display = show ? "flex" : "none";
+  if (!show) return;
+
+  const masks = state.finishedPolygons;
+  const predictionBoxes = image.prediction_boxes || [];
+  const visibleCount = masks.filter((poly) => isPolygonVisible(poly)).length;
+  maskSidebarCount.textContent = String(masks.length);
+  maskSidebarMeta.textContent = state.correctionMode === "redraw_all"
+    ? "All original detections for this image will be replaced."
+    : `${visibleCount} visible · click a row or the canvas to select`;
+  correctionModePatchBtn?.classList.toggle("active", state.correctionMode === "patch");
+  correctionModeRedrawBtn?.classList.toggle("active", state.correctionMode === "redraw_all");
+
+  if (predictionSidebar && predictionList && predictionSidebarMeta) {
+    const locked = state.correctionMode === "redraw_all";
+    predictionSidebar.classList.toggle("locked", locked);
+    if (!predictionBoxes.length) {
+      predictionSidebarMeta.textContent = locked
+        ? "No original detections are available. New masks will define the full image."
+        : "No original detections are available. New masks will be exported as additions.";
+      predictionList.innerHTML = "";
+    } else {
+      predictionSidebarMeta.textContent = locked
+        ? "All original detections are ignored during export."
+        : "Choose Keep, Replace, or Delete for each original detection.";
+      predictionList.innerHTML = predictionBoxes.map((box) => {
+        const objectKey = String(box.object_id);
+        const action = predictionActionFor(box.object_id);
+        const active = !locked && state.activePredictionId === objectKey;
+        const linkedMask = linkedMaskForPrediction(box.object_id);
+        return `
+          <div class="prediction-item ${active ? "active" : ""} ${locked ? "locked" : ""}" data-prediction-id="${objectKey}">
+            <div class="prediction-main">
+              <div class="prediction-title">${escapeHtml(box.class_label)} ${box.object_id}</div>
+              <div class="prediction-subtitle">conf ${Number(box.confidence || 0).toFixed(2)} · ${action}${linkedMask ? " · mask linked" : ""}</div>
+            </div>
+            <div class="prediction-actions">
+              <button class="prediction-action-btn ${action === "keep" ? "active" : ""}" type="button" data-prediction-action="keep" data-prediction-id="${objectKey}" ${locked ? "disabled" : ""}>Keep</button>
+              <button class="prediction-action-btn ${action === "replace" ? "active" : ""}" type="button" data-prediction-action="replace" data-prediction-id="${objectKey}" ${locked ? "disabled" : ""}>Replace</button>
+              <button class="prediction-action-btn ${action === "delete" ? "active" : ""}" type="button" data-prediction-action="delete" data-prediction-id="${objectKey}" ${locked ? "disabled" : ""}>Delete</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      predictionList.querySelectorAll(".prediction-item").forEach((row) => {
+        row.addEventListener("click", (event) => {
+          if (state.correctionMode === "redraw_all") return;
+          if (event.target.closest("[data-prediction-action]")) return;
+          state.activePredictionId = row.dataset.predictionId || null;
+          renderMaskSidebar();
+        });
+      });
+      predictionList.querySelectorAll("[data-prediction-action]").forEach((btn) => {
+        btn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          setPredictionAction(btn.dataset.predictionId, btn.dataset.predictionAction);
+        });
+      });
+    }
+  }
+
+  if (!masks.length) {
+    maskList.innerHTML = "";
+    return;
+  }
+
+  maskList.innerHTML = masks.map((poly, index) => {
+    const active = poly.id === state.activeMaskId;
+    const visible = isPolygonVisible(poly);
+    const color = polyColor(index);
+    const bbox = poly.bbox || computePolygonBBox(poly.points);
+    const size = `${Math.round(bbox.maxX - bbox.minX)}×${Math.round(bbox.maxY - bbox.minY)}`;
+    const mergeLabel = poly.merge_action === "replace" && poly.source_object_id !== null
+      ? `Replace ${poly.source_object_id}`
+      : "Add";
+    return `
+      <div class="mask-list-item ${active ? "active" : ""} ${visible ? "" : "hidden"}" data-mask-id="${escapeHtml(poly.id)}">
+        <div class="mask-list-main">
+          <div class="mask-list-title">
+            <span class="mask-color-dot" style="background:${color}"></span>
+            <span>${escapeHtml(poly.class_label)} ${index + 1}</span>
+          </div>
+          <div class="mask-list-subtitle">${escapeHtml(poly.id)} · ${size} · ${mergeLabel}</div>
+        </div>
+        <div class="mask-list-actions">
+          <button class="mask-icon-btn mask-visibility" type="button" data-mask-action="toggle" data-mask-id="${escapeHtml(poly.id)}" title="${visible ? "Hide mask" : "Show mask"}">${visible ? "👁" : "🙈"}</button>
+          <button class="mask-icon-btn mask-delete" type="button" data-mask-action="delete" data-mask-id="${escapeHtml(poly.id)}" title="Delete mask">🗑</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  maskList.querySelectorAll(".mask-list-item").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-mask-action]");
+      const maskId = row.dataset.maskId;
+      if (!maskId) return;
+      if (action) return;
+      selectMask(maskId);
+    });
+  });
+  maskList.querySelectorAll("[data-mask-action='toggle']").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleMaskVisibility(btn.dataset.maskId);
+    });
+  });
+  maskList.querySelectorAll("[data-mask-action='delete']").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectMask(btn.dataset.maskId);
+      deleteSelectedMask();
+    });
+  });
+}
+
 function redrawCanvas() {
   ctx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
 
   // Draw finished polygons
   for (let i = 0; i < state.finishedPolygons.length; i++) {
     const poly = state.finishedPolygons[i];
-    if (!poly.points.length) continue;
+    if (!poly.points.length || !isPolygonVisible(poly)) continue;
     const color = polyColor(i);
+    const isActive = poly.id === state.activeMaskId;
 
     ctx.beginPath();
     ctx.moveTo(poly.points[0].x, poly.points[0].y);
@@ -373,18 +823,76 @@ function redrawCanvas() {
       ctx.lineTo(poly.points[j].x, poly.points[j].y);
     }
     ctx.closePath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = isActive ? "#1d4ed8" : color;
+    ctx.lineWidth = isActive ? 4 : 2.5;
     ctx.setLineDash([]);
     ctx.stroke();
-    ctx.fillStyle = color + "33"; // ~20% opacity fill
+    ctx.fillStyle = isActive ? "rgba(29, 78, 216, 0.18)" : color + "33"; // ~20% opacity fill
     ctx.fill();
 
     // Class label + real-world value — pill badge at polygon centroid
     const cx = poly.points.reduce((s, p) => s + p.x, 0) / poly.points.length;
     const cy = poly.points.reduce((s, p) => s + p.y, 0) / poly.points.length;
-    drawPolygonBadge(cx, cy, poly.class_label, poly.value, poly.unit, color);
+    drawPolygonBadge(cx, cy, poly.class_label, poly.value, poly.unit, isActive ? "#1d4ed8" : color);
   }
+
+  // Draw SAM2 preview polygons before prompt markers so the control points
+  // stay readable while the mask updates live.
+  for (const poly of state.sam2PreviewPolygons) {
+    if (!poly.points || poly.points.length < 3) continue;
+    const canvasPoints = poly.points.map((pt) => normalizedCanvasPoint(pt));
+    ctx.beginPath();
+    ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+    for (let i = 1; i < canvasPoints.length; i++) {
+      ctx.lineTo(canvasPoints[i].x, canvasPoints[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = "rgba(91, 33, 182, 0.22)";
+    ctx.strokeStyle = "rgba(91, 33, 182, 0.92)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 6]);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const cx = canvasPoints.reduce((sum, pt) => sum + pt.x, 0) / canvasPoints.length;
+    const cy = canvasPoints.reduce((sum, pt) => sum + pt.y, 0) / canvasPoints.length;
+    drawPolygonBadge(cx, cy, "SAM3 Preview", null, "", "#7c3aed");
+  }
+
+  const committedBox = state.sam2Box
+    ? {
+        x1: state.sam2Box.x1 * annotationCanvas.width,
+        y1: state.sam2Box.y1 * annotationCanvas.height,
+        x2: state.sam2Box.x2 * annotationCanvas.width,
+        y2: state.sam2Box.y2 * annotationCanvas.height,
+      }
+    : null;
+  const draftingBox = currentSam2BoxDraft();
+  const previewBox = draftingBox || committedBox;
+  if (previewBox) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(37, 99, 235, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 4]);
+    ctx.strokeRect(
+      previewBox.x1,
+      previewBox.y1,
+      Math.max(1, previewBox.x2 - previewBox.x1),
+      Math.max(1, previewBox.y2 - previewBox.y1),
+    );
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(37, 99, 235, 0.08)";
+    ctx.fillRect(
+      previewBox.x1,
+      previewBox.y1,
+      Math.max(1, previewBox.x2 - previewBox.x1),
+      Math.max(1, previewBox.y2 - previewBox.y1),
+    );
+    ctx.restore();
+  }
+
+  state.sam2Points.forEach((point, index) => drawSam2PromptMarker(point, index));
 
   // Draw in-progress polygon
   if (state.drawMode && state.currentPolygon.length > 0) {
@@ -454,113 +962,283 @@ function exitDrawMode() {
   state.currentPolygon = [];
   state.mousePt = null;
   annotationCanvas.classList.remove("draw-mode");
-  annotationCanvas.style.pointerEvents = "none";
+  if (!state.sam2Mode && currentImage()?.decision !== "wrong") {
+    annotationCanvas.style.pointerEvents = "none";
+  } else {
+    annotationCanvas.style.pointerEvents = "auto";
+  }
   drawPolygonBtn.classList.remove("active");
   annotHint.style.display = "none";
   redrawCanvas();
 }
 
 // ── SAM2 AI-assist: click anywhere on an object → server returns polygon ─────
+function setSam2PromptType(kind) {
+  state.sam2PromptType = kind === "negative" ? "negative" : "positive";
+  sam2PositiveBtn?.classList.toggle("active", state.sam2PromptType === "positive");
+  sam2NegativeBtn?.classList.toggle("active", state.sam2PromptType === "negative");
+}
+
+function setSam2PromptSource(kind, { resetDraft = true } = {}) {
+  const nextSource = kind === "box" ? "box" : "point";
+  if (resetDraft && state.sam2PromptSource !== nextSource) {
+    state.sam2PreviewPolygons = [];
+    if (nextSource === "box") {
+      state.sam2Points = [];
+      state.sam2DraggingIndex = -1;
+      state.sam2SuppressClick = false;
+    } else {
+      state.sam2Box = null;
+      state.sam2BoxDraftStart = null;
+      state.sam2BoxDraftCurrent = null;
+    }
+  }
+  state.sam2PromptSource = nextSource;
+  sam2PointModeBtn?.classList.toggle("active", state.sam2PromptSource === "point");
+  sam2BoxModeBtn?.classList.toggle("active", state.sam2PromptSource === "box");
+  sam2PositiveBtn?.toggleAttribute("disabled", state.sam2PromptSource !== "point");
+  sam2NegativeBtn?.toggleAttribute("disabled", state.sam2PromptSource !== "point");
+  updateAnnotationToolbar();
+  redrawCanvas();
+}
+
 function enterSam2Mode() {
   if (!state.sam2Available) {
-    showToast("SAM2 isn't ready on the server. See /api/sam2/status.");
+    showToast("SAM3 isn't ready on the server. See /api/sam3/status.");
     return;
   }
-  // Only one tool active at a time. Bail out of polygon-draw mode if needed.
-  if (state.drawMode) exitDrawMode();
+  if (state.drawMode) {
+    if (!ensureNoPendingSam2Draft("switch to SAM3 point prompts")) return;
+    exitDrawMode();
+  }
   state.sam2Mode = true;
   annotationCanvas.classList.add("sam2-mode");
   annotationCanvas.style.pointerEvents = "auto";
   if (sam2ToolBtn) sam2ToolBtn.classList.add("active");
-  if (annotHintSam2) annotHintSam2.style.display = "";
+  setSam2PromptType(state.sam2PromptType);
+  setSam2PromptSource(state.sam2PromptSource, { resetDraft: false });
+  updateAnnotationToolbar();
+  redrawCanvas();
 }
 
 function exitSam2Mode() {
   state.sam2Mode = false;
   annotationCanvas.classList.remove("sam2-mode");
-  // Don't blanket-disable pointer events — drawMode may have set them on.
-  if (!state.drawMode) annotationCanvas.style.pointerEvents = "none";
+  if (!state.drawMode && currentImage()?.decision !== "wrong") {
+    annotationCanvas.style.pointerEvents = "none";
+  } else {
+    annotationCanvas.style.pointerEvents = "auto";
+  }
   if (sam2ToolBtn) sam2ToolBtn.classList.remove("active");
-  if (annotHintSam2) annotHintSam2.style.display = "none";
+  state.sam2DraggingIndex = -1;
+  updateAnnotationToolbar();
 }
 
-async function runSam2AtClick(canvasPt) {
-  if (state.sam2Pending) return;
-  const image = currentImage();
-  if (!state.session || !image) {
-    showToast("No image loaded.");
+function hitTestSam2Point(canvasPt) {
+  for (let i = state.sam2Points.length - 1; i >= 0; i--) {
+    const point = normalizedCanvasPoint(state.sam2Points[i]);
+    const dx = canvasPt.x - point.x;
+    const dy = canvasPt.y - point.y;
+    if (Math.sqrt(dx * dx + dy * dy) <= 12) return i;
+  }
+  return -1;
+}
+
+function queueSam2Inference(delay = 140) {
+  window.clearTimeout(state.sam2InferenceTimer);
+  if (state.sam2Points.length === 0 && !state.sam2Box) {
+    state.sam2PreviewPolygons = [];
+    state.sam2NeedsRerun = false;
+    redrawCanvas();
+    updateAnnotationToolbar();
     return;
   }
+  state.sam2InferenceTimer = window.setTimeout(() => {
+    runSam2PreviewInference();
+  }, delay);
+}
+
+async function runSam2PreviewInference() {
+  const image = currentImage();
+  if (!state.session || !image) return;
+  if (state.sam2Points.length === 0 && !state.sam2Box) return;
+  if (state.sam2Pending) {
+    state.sam2NeedsRerun = true;
+    return;
+  }
+
   state.sam2Pending = true;
+  state.sam2NeedsRerun = false;
   if (sam2ToolBtn) sam2ToolBtn.classList.add("loading");
-  showToast("SAM2 is thinking…");
+  updateAnnotationToolbar();
 
   try {
-    const norm = canvasToNorm(canvasPt.x, canvasPt.y);
-    const response = await api("/api/sam2/segment", {
+    const response = await api("/api/sam3/segment", {
       method: "POST",
       body: JSON.stringify({
         folder_path: state.session.folder_path,
         relative_path: image.relative_path,
-        points: [norm],
-        labels: [1],
+        points: state.sam2Points.map((pt) => ({ x: pt.x, y: pt.y })),
+        labels: state.sam2Points.map((pt) => pt.label),
+        box: state.sam2Box ? {
+          x1: state.sam2Box.x1,
+          y1: state.sam2Box.y1,
+          x2: state.sam2Box.x2,
+          y2: state.sam2Box.y2,
+        } : null,
         image_natural_width: mainImage.naturalWidth || 1,
         image_natural_height: mainImage.naturalHeight || 1,
       }),
     });
     const result = await response.json();
-    const polys = result.polygons || [];
-    if (polys.length === 0) {
-      showToast("SAM2 didn't find an object at that point — try clicking the centre of the shape.");
-      return;
-    }
-
-    // Add ALL returned polygons (usually one, but SAM2 can split). Each
-    // gets the currently-selected class label and is treated identically
-    // to a hand-drawn polygon from here on (incl. area calculation).
-    for (const p of polys) {
-      const canvasPoints = p.points.map((pt) => normToCanvas(pt.x, pt.y));
-      if (canvasPoints.length < 3) continue;
-      const newPoly = {
-        id: genId(),
-        class_label: classSelect.value,
-        points: canvasPoints,
-        value: null,
-        unit: "",
-      };
-      state.finishedPolygons.push(newPoly);
-      calculatePolygonArea(newPoly); // fire-and-forget
-    }
-    updateAnnotationToolbar();
+    state.sam2PreviewPolygons = (result.polygons || [])
+      .filter((poly) => Array.isArray(poly.points) && poly.points.length >= 3)
+      .map((poly) => ({
+        points: poly.points.map((pt) => ({
+          x: clamp01(pt.x),
+          y: clamp01(pt.y),
+        })),
+      }));
     redrawCanvas();
-    queueAnnotationSave();
-    showToast(`SAM2 added ${polys.length} polygon${polys.length === 1 ? "" : "s"} (${result.duration_ms} ms).`);
+    updateAnnotationToolbar();
   } catch (err) {
+    state.sam2PreviewPolygons = [];
     if (err.status === 503) {
-      // Service-not-configured — surface the install hint.
       state.sam2Available = false;
       updateSam2Button();
-      showToast(err.message || "SAM2 is not installed on the server.");
+      showToast(err.message || "SAM3 is not installed on the server.");
     } else {
-      showToast(`SAM2 failed: ${err.message || "unknown error"}`);
+      showToast(`SAM3 failed: ${err.message || "unknown error"}`);
     }
   } finally {
     state.sam2Pending = false;
     if (sam2ToolBtn) sam2ToolBtn.classList.remove("loading");
+    updateAnnotationToolbar();
+    if (state.sam2NeedsRerun) {
+      state.sam2NeedsRerun = false;
+      queueSam2Inference(0);
+    }
   }
+}
+
+function addSam2Prompt(canvasPt) {
+  const norm = canvasToNorm(canvasPt.x, canvasPt.y);
+  state.sam2Points.push({
+    x: clamp01(norm.x),
+    y: clamp01(norm.y),
+    label: state.sam2PromptType === "negative" ? 0 : 1,
+  });
+  updateAnnotationToolbar();
+  redrawCanvas();
+  queueSam2Inference();
+}
+
+function commitSam2BoxDraft() {
+  const draft = currentSam2BoxDraft();
+  state.sam2BoxDraftStart = null;
+  state.sam2BoxDraftCurrent = null;
+  if (!draft) {
+    redrawCanvas();
+    return;
+  }
+  const width = draft.x2 - draft.x1;
+  const height = draft.y2 - draft.y1;
+  if (width < 8 || height < 8) {
+    showToast("Box prompt is too small. Drag a larger area.");
+    redrawCanvas();
+    return;
+  }
+  state.sam2Box = {
+    x1: clamp01(draft.x1 / annotationCanvas.width),
+    y1: clamp01(draft.y1 / annotationCanvas.height),
+    x2: clamp01(draft.x2 / annotationCanvas.width),
+    y2: clamp01(draft.y2 / annotationCanvas.height),
+  };
+  redrawCanvas();
+  queueSam2Inference(0);
+}
+
+function undoSam2Prompt() {
+  if (state.sam2PromptSource === "box") {
+    state.sam2Box = null;
+  } else if (state.sam2Points.length) {
+    state.sam2Points.pop();
+  } else if (state.sam2Box) {
+    state.sam2Box = null;
+  } else {
+    return;
+  }
+  state.sam2PreviewPolygons = [];
+  updateAnnotationToolbar();
+  redrawCanvas();
+  queueSam2Inference(0);
+}
+
+function clearSam2Prompts() {
+  resetSam2Draft();
+  updateAnnotationToolbar();
+  redrawCanvas();
+}
+
+function prepareCommittedPolygon(canvasPoints) {
+  const replacementObjectId = state.correctionMode === "patch" && state.activePredictionId
+    && predictionActionFor(state.activePredictionId) === "replace"
+      ? Number(state.activePredictionId)
+      : null;
+  if (replacementObjectId !== null) {
+    removeReplacementMask(replacementObjectId);
+  }
+  return {
+    id: genId(),
+    class_label: classSelect.value,
+    points: canvasPoints,
+    value: null,
+    unit: "",
+    source_object_id: replacementObjectId,
+    merge_action: replacementObjectId !== null ? "replace" : "add",
+    bbox: computePolygonBBox(canvasPoints),
+  };
+}
+
+function confirmSam2Mask() {
+  if (!state.sam2PreviewPolygons.length) {
+    showToast("Add point prompts until SAM3 produces a preview, then confirm it.");
+    return;
+  }
+
+  const committed = [];
+  for (const poly of state.sam2PreviewPolygons) {
+    const canvasPoints = poly.points.map((pt) => normalizedCanvasPoint(pt));
+    if (canvasPoints.length < 3) continue;
+    const newPoly = prepareCommittedPolygon(canvasPoints);
+    state.finishedPolygons.push(newPoly);
+    committed.push(newPoly);
+  }
+
+  if (!committed.length) {
+    showToast("SAM3 preview did not produce a valid polygon to commit.");
+    return;
+  }
+
+  resetSam2Draft();
+  updateAnnotationToolbar();
+  redrawCanvas();
+  queueAnnotationSave();
+  for (const poly of committed) calculatePolygonArea(poly);
+  showToast(`Confirmed ${committed.length} SAM3 polygon${committed.length === 1 ? "" : "s"}.`);
 }
 
 function updateSam2Button() {
   if (!sam2ToolBtn) return;
   sam2ToolBtn.disabled = !state.sam2Available;
   sam2ToolBtn.title = state.sam2Available
-    ? "AI-assist: click on the object you want to outline"
-    : "SAM2 is not configured on the server. Click for details.";
+    ? "SAM3 assist: add inclusion/exclusion point prompts or a box prompt, preview the mask, then confirm it"
+    : "SAM3 is not configured on the server. Click for details.";
 }
 
 async function probeSam2Availability() {
   try {
-    const response = await api("/api/sam2/status");
+    const response = await api("/api/sam3/status");
     const data = await response.json();
     state.sam2Available = !!data.available;
     if (!data.available && data.reason) {
@@ -578,13 +1256,7 @@ function closeCurrentPolygon() {
     showToast("Need at least 3 points to close a polygon.");
     return;
   }
-  const newPoly = {
-    id: genId(),
-    class_label: classSelect.value,
-    points: [...state.currentPolygon],
-    value: null,
-    unit: "",
-  };
+  const newPoly = prepareCommittedPolygon([...state.currentPolygon]);
   state.finishedPolygons.push(newPoly);
   state.currentPolygon = [];
   state.mousePt = null;
@@ -628,15 +1300,37 @@ async function calculatePolygonArea(poly) {
 // Click disambiguation: 220 ms timer so dblclick doesn't add spurious vertices
 let _clickTimer = null;
 
+annotationCanvas.addEventListener("mousedown", (e) => {
+  if (!state.sam2Mode) return;
+  if (state.sam2PromptSource === "box") {
+    const canvasPt = getCanvasPos(e);
+    state.sam2BoxDraftStart = canvasPt;
+    state.sam2BoxDraftCurrent = canvasPt;
+    redrawCanvas();
+    return;
+  }
+  const hitIndex = hitTestSam2Point(getCanvasPos(e));
+  if (hitIndex === -1) return;
+  state.sam2DraggingIndex = hitIndex;
+  state.sam2SuppressClick = false;
+});
+
 annotationCanvas.addEventListener("click", (e) => {
-  // SAM2 mode: a single click ships the point to the server for a mask.
-  // Don't go through the polygon-draw timer logic — SAM2 is one-shot.
   if (state.sam2Mode) {
-    runSam2AtClick(getCanvasPos(e));
+    if (state.sam2PromptSource === "box") return;
+    if (state.sam2SuppressClick) {
+      state.sam2SuppressClick = false;
+      return;
+    }
+    addSam2Prompt(getCanvasPos(e));
     return;
   }
 
-  if (!state.drawMode) return;
+  if (!state.drawMode) {
+    const hitId = hitTestFinishedMask(getCanvasPos(e));
+    selectMask(hitId);
+    return;
+  }
 
   const pt = getCanvasPos(e);
 
@@ -676,12 +1370,62 @@ annotationCanvas.addEventListener("dblclick", (e) => {
 });
 
 annotationCanvas.addEventListener("mousemove", (e) => {
+  if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
+    state.sam2BoxDraftCurrent = getCanvasPos(e);
+    redrawCanvas();
+    return;
+  }
+  if (state.sam2Mode && state.sam2DraggingIndex !== -1) {
+    const canvasPt = getCanvasPos(e);
+    const norm = canvasToNorm(canvasPt.x, canvasPt.y);
+    state.sam2Points[state.sam2DraggingIndex] = {
+      ...state.sam2Points[state.sam2DraggingIndex],
+      x: clamp01(norm.x),
+      y: clamp01(norm.y),
+    };
+    state.sam2SuppressClick = true;
+    redrawCanvas();
+    queueSam2Inference();
+    return;
+  }
   if (!state.drawMode) return;
   state.mousePt = getCanvasPos(e);
   redrawCanvas();
 });
 
+annotationCanvas.addEventListener("mouseup", () => {
+  if (!state.sam2Mode) return;
+  if (state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
+    commitSam2BoxDraft();
+    return;
+  }
+  if (state.sam2DraggingIndex !== -1) {
+    state.sam2DraggingIndex = -1;
+    queueSam2Inference(0);
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  if (!state.sam2Mode) return;
+  if (state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
+    commitSam2BoxDraft();
+    return;
+  }
+  if (state.sam2DraggingIndex !== -1) {
+    state.sam2DraggingIndex = -1;
+    queueSam2Inference(0);
+  }
+});
+
 annotationCanvas.addEventListener("mouseleave", () => {
+  if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
+    redrawCanvas();
+    return;
+  }
+  if (state.sam2Mode && state.sam2DraggingIndex !== -1) {
+    state.sam2DraggingIndex = -1;
+    queueSam2Inference(0);
+  }
   state.mousePt = null;
   redrawCanvas();
 });
@@ -690,11 +1434,52 @@ annotationCanvas.addEventListener("mouseleave", () => {
 function updateAnnotationToolbar() {
   const count = state.finishedPolygons.length;
   polygonCountLabel.textContent = `${count} polygon${count !== 1 ? "s" : ""}`;
+
+  const sam2DraftActive = state.sam2Mode || hasPendingSam2Draft();
+  if (sam2Controls) sam2Controls.style.display = sam2DraftActive ? "inline-flex" : "none";
+  if (annotHintSam2) annotHintSam2.style.display = state.sam2Mode ? "" : "none";
+  if (annotHintSam2) {
+    annotHintSam2.textContent = state.sam2PromptSource === "box"
+      ? "Draw one box around the pavement — SAM3 will predict from the box prompt"
+      : "Add green inclusion and red exclusion points — SAM3 updates the preview live";
+  }
+  if (annotHintSam2Live) {
+    annotHintSam2Live.style.display = hasPendingSam2Draft() ? "" : "none";
+  }
+  if (sam2PromptCountLabel) {
+    const pointCount = state.sam2Points.length;
+    const boxCount = state.sam2Box ? 1 : 0;
+    const promptCount = pointCount + boxCount;
+    sam2PromptCountLabel.textContent = `${promptCount} prompt${promptCount !== 1 ? "s" : ""}`;
+    sam2PromptCountLabel.style.display = sam2DraftActive ? "" : "none";
+  }
+  if (sam2UndoBtn) sam2UndoBtn.disabled = state.sam2Points.length === 0;
+  if (sam2ClearBtn) sam2ClearBtn.disabled = !hasPendingSam2Draft();
+  if (sam2ConfirmBtn) {
+    sam2ConfirmBtn.disabled = state.sam2PreviewPolygons.length === 0 || state.sam2Pending;
+    sam2ConfirmBtn.textContent = state.sam2Pending ? "Updating…" : "Confirm Mask";
+  }
+  if (deleteSelectedMaskBtn) {
+    deleteSelectedMaskBtn.disabled = !state.activeMaskId;
+    deleteSelectedMaskBtn.textContent = state.activeMaskId ? "Delete Selected" : "Delete Selected";
+  }
+  sam2PositiveBtn?.classList.toggle("active", state.sam2PromptType === "positive");
+  sam2NegativeBtn?.classList.toggle("active", state.sam2PromptType === "negative");
+  sam2PointModeBtn?.classList.toggle("active", state.sam2PromptSource === "point");
+  sam2BoxModeBtn?.classList.toggle("active", state.sam2PromptSource === "box");
+  sam2PositiveBtn?.toggleAttribute("disabled", state.sam2PromptSource !== "point");
+  sam2NegativeBtn?.toggleAttribute("disabled", state.sam2PromptSource !== "point");
 }
 
 function showAnnotationToolbar(show) {
   annotationToolbar.style.display = show ? "flex" : "none";
-  if (!show) exitDrawMode();
+  annotationCanvas.style.pointerEvents = show ? "auto" : "none";
+  if (!show) {
+    exitDrawMode();
+    resetSam2Draft();
+    exitSam2Mode();
+    state.activeMaskId = null;
+  }
 }
 
 // ── Annotation save (debounced) ──────────────────────────────────────────────
@@ -720,6 +1505,8 @@ async function saveAnnotations() {
     points: poly.points.map((pt) => canvasToNorm(pt.x, pt.y)),
     value: poly.value ?? null,
     unit: poly.unit || "",
+    source_object_id: poly.source_object_id ?? null,
+    merge_action: poly.merge_action === "replace" ? "replace" : "add",
   }));
 
   const response = await api("/api/annotations", {
@@ -730,6 +1517,8 @@ async function saveAnnotations() {
       polygons,
       image_natural_width: mainImage.naturalWidth || 1,
       image_natural_height: mainImage.naturalHeight || 1,
+      correction_mode: state.correctionMode,
+      prediction_actions: state.predictionActions,
     }),
   });
   const payload = await response.json();
@@ -816,6 +1605,7 @@ function renderQueue() {
 
   queueList.querySelectorAll(".queue-item").forEach((button) => {
     button.addEventListener("click", () => {
+      if (!ensureNoPendingSam2Draft("switch images")) return;
       state.currentRelativePath = decodeURIComponent(button.dataset.relativePath);
       render();
       persistUiState();
@@ -825,6 +1615,8 @@ function renderQueue() {
 
 function loadPolygonsForCurrentImage() {
   const image = currentImage();
+  state.activeMaskId = null;
+  state.activePredictionId = null;
   if (image && image.polygons && image.polygons.length) {
     state.finishedPolygons = image.polygons.map((poly) => ({
       id: poly.id,
@@ -832,11 +1624,16 @@ function loadPolygonsForCurrentImage() {
       points: poly.points.map((p) => normToCanvas(p.x, p.y)),
       value: poly.value ?? null,
       unit: poly.unit || "",
+      source_object_id: poly.source_object_id ?? null,
+      merge_action: poly.merge_action || "add",
+      bbox: computePolygonBBox(poly.points.map((p) => normToCanvas(p.x, p.y))),
     }));
   } else {
     state.finishedPolygons = [];
   }
   state.currentPolygon = [];
+  resetSam2Draft();
+  syncImageCorrectionState();
 }
 
 function renderViewer() {
@@ -859,6 +1656,8 @@ function renderViewer() {
   if (!hasImage) {
     imageStage.classList.remove("ready");
     imageCanvasWrap.style.display = "none";
+    imageCanvasWrap.style.width = "";
+    imageCanvasWrap.style.height = "";
     emptyStage.style.display = "";
     mainImage.removeAttribute("src");
     currentStatus.textContent = "Unreviewed";
@@ -895,6 +1694,8 @@ function renderViewer() {
     updateAnnotationToolbar();
     redrawCanvas();
   }
+
+  updateZoomLabel();
 
   currentStatus.textContent = statusLabel(image.decision);
   currentStatus.className   = `status-pill ${statusClass(image.decision)}`;
@@ -999,9 +1800,11 @@ function setStepBadge(id, done) { setDone(id, done); }
 function render() {
   updateFilterButtons();
   syncCurrentImage();
+  syncImageCorrectionState();
   renderSummary();
   renderQueue();
   renderViewer();
+  renderMaskSidebar();
   if (state.session) {
     folderPathInput.value = state.session.folder_path;
     targetFolderPathInput.value = state.session.target_folder_path || "";
@@ -1072,6 +1875,7 @@ async function importBrowserFolder(fileList) {
 async function updateDecision(decision) {
   const image = currentImage();
   if (!state.session || !image) return;
+  if (!ensureNoPendingSam2Draft(`mark this image as ${decision}`)) return false;
 
   const response = await api("/api/review", {
     method: "POST",
@@ -1086,21 +1890,28 @@ async function updateDecision(decision) {
   state.currentRelativePath = image.relative_path;
   render();
   persistUiState();
+  return true;
 }
 
 // ── Target folder ────────────────────────────────────────────────────────────
 async function saveTargetFolderPath() {
   if (!state.session) throw new Error("Load a prediction folder first.");
-  const response = await api("/api/session-config", {
-    method: "POST",
-    body: JSON.stringify({
-      folder_path: state.session.folder_path,
-      target_folder_path: targetFolderPathInput.value.trim() || null,
-    }),
-  });
-  const payload = await response.json();
-  state.session = payload.session;
-  render();
+  if (state.targetSavePending) return;
+  state.targetSavePending = true;
+  try {
+    const response = await api("/api/session-config", {
+      method: "POST",
+      body: JSON.stringify({
+        folder_path: state.session.folder_path,
+        target_folder_path: targetFolderPathInput.value.trim() || null,
+      }),
+    });
+    const payload = await response.json();
+    state.session = payload.session;
+    render();
+  } finally {
+    state.targetSavePending = false;
+  }
 }
 
 function queueTargetFolderAutosave() {
@@ -1196,6 +2007,7 @@ async function exportUpdatedCsv() {
 // ── Navigation & persistence ─────────────────────────────────────────────────
 function navigate(step) {
   if (!state.session) return;
+  if (!ensureNoPendingSam2Draft("navigate away")) return;
   const filtered = filterImages(state.session.images, state.activeFilter);
   if (!filtered.length) return;
   const currentIndex = Math.max(
@@ -1273,15 +2085,15 @@ async function exportSelectionTxt() {
 // ── Image onload → sync overlays ─────────────────────────────────────────────
 mainImage.addEventListener("load", () => {
   loadPolygonsForCurrentImage();
-  syncOverlaySize();
+  applyViewerZoom();
   updateAnnotationToolbar();
 });
 
 // Resize observer: reproject polygons and redraw when panel size changes
 const resizeObserver = new ResizeObserver(() => {
-  if (mainImage.naturalWidth) syncOverlaySize();
+  if (mainImage.naturalWidth) applyViewerZoom();
 });
-resizeObserver.observe(imageCanvasWrap);
+resizeObserver.observe(imageStage);
 
 // ── Event listeners ──────────────────────────────────────────────────────────
 chooseFolderBtn.addEventListener("click", async () => {
@@ -1335,26 +2147,39 @@ exportFilenamesBtn.addEventListener("click", async () => {
 });
 
 markCorrectBtn.addEventListener("click", async () => {
-  try { await updateDecision("correct"); showToast("Marked correct."); }
+  try {
+    const changed = await updateDecision("correct");
+    if (changed) showToast("Marked correct.");
+  }
   catch (err) { showToast(err.message); }
 });
 
 markWrongBtn.addEventListener("click", async () => {
-  try { await updateDecision("wrong"); showToast("Marked wrong — draw polygon corrections below."); }
+  try {
+    const changed = await updateDecision("wrong");
+    if (changed) showToast("Marked wrong — draw polygon corrections below.");
+  }
   catch (err) { showToast(err.message); }
 });
 
 clearBtn.addEventListener("click", async () => {
-  try { await updateDecision("unreviewed"); showToast("Cleared review state."); }
+  try {
+    const changed = await updateDecision("unreviewed");
+    if (changed) showToast("Cleared review state.");
+  }
   catch (err) { showToast(err.message); }
 });
 
 prevBtn.addEventListener("click", () => navigate(-1));
 nextBtn.addEventListener("click", () => navigate(1));
+zoomOutBtn?.addEventListener("click", () => setViewerZoom(state.viewerZoom - 0.25));
+zoomResetBtn?.addEventListener("click", () => setViewerZoom(1));
+zoomInBtn?.addEventListener("click", () => setViewerZoom(state.viewerZoom + 0.25));
 
 document.getElementById("filter-group").addEventListener("click", (event) => {
   const target = event.target.closest("[data-filter]");
   if (!target) return;
+  if (!ensureNoPendingSam2Draft("change filters")) return;
   state.activeFilter = target.dataset.filter;
   render();
   persistUiState();
@@ -1362,8 +2187,10 @@ document.getElementById("filter-group").addEventListener("click", (event) => {
 
 // Annotation toolbar
 drawPolygonBtn.addEventListener("click", () => {
-  // Tools are mutually exclusive — turn off SAM2 if it's the active mode.
-  if (state.sam2Mode) exitSam2Mode();
+  if (state.sam2Mode || hasPendingSam2Draft()) {
+    if (!ensureNoPendingSam2Draft("switch to manual polygon drawing")) return;
+    exitSam2Mode();
+  }
   if (state.drawMode) { exitDrawMode(); } else { enterDrawMode(); }
 });
 
@@ -1372,16 +2199,50 @@ if (sam2ToolBtn) {
     // Disabled state still receives clicks via JS — surface the hint.
     if (!state.sam2Available) {
       const reason = sam2ToolBtn.dataset.unavailableReason
-        || "SAM2 is not configured on the server.";
+        || "SAM3 is not configured on the server.";
       showToast(reason);
       return;
     }
-    if (state.sam2Mode) exitSam2Mode(); else enterSam2Mode();
+    if (state.sam2Mode) {
+      exitSam2Mode();
+    } else {
+      enterSam2Mode();
+    }
   });
 }
 
+sam2PositiveBtn?.addEventListener("click", () => {
+  if (!state.sam2Mode) enterSam2Mode();
+  setSam2PromptSource("point");
+  setSam2PromptType("positive");
+  showToast("Point prompt: Include");
+});
+sam2NegativeBtn?.addEventListener("click", () => {
+  if (!state.sam2Mode) enterSam2Mode();
+  setSam2PromptSource("point");
+  setSam2PromptType("negative");
+  showToast("Point prompt: Exclude");
+});
+sam2PointModeBtn?.addEventListener("click", () => {
+  if (!state.sam2Mode) enterSam2Mode();
+  setSam2PromptSource("point");
+  showToast("SAM3 point mode: click to add positive or negative points.");
+});
+sam2BoxModeBtn?.addEventListener("click", () => {
+  if (!state.sam2Mode) enterSam2Mode();
+  setSam2PromptSource("box");
+  showToast("SAM3 box mode: drag one box over the pavement.");
+});
+sam2UndoBtn?.addEventListener("click", () => undoSam2Prompt());
+sam2ClearBtn?.addEventListener("click", () => clearSam2Prompts());
+sam2ConfirmBtn?.addEventListener("click", () => confirmSam2Mask());
+correctionModePatchBtn?.addEventListener("click", () => setCorrectionMode("patch"));
+correctionModeRedrawBtn?.addEventListener("click", () => setCorrectionMode("redraw_all"));
+
 undoPolygonBtn.addEventListener("click", () => {
-  if (state.drawMode && state.currentPolygon.length > 0) {
+  if (state.sam2Mode || hasPendingSam2Draft()) {
+    undoSam2Prompt();
+  } else if (state.drawMode && state.currentPolygon.length > 0) {
     state.currentPolygon.pop();
     redrawCanvas();
   } else if (state.finishedPolygons.length > 0) {
@@ -1393,11 +2254,24 @@ undoPolygonBtn.addEventListener("click", () => {
 });
 
 clearPolygonsBtn.addEventListener("click", () => {
+  if (state.sam2Mode || hasPendingSam2Draft()) {
+    clearSam2Prompts();
+    return;
+  }
   exitDrawMode();
   state.finishedPolygons = [];
+  Object.keys(state.predictionActions).forEach((key) => {
+    if (state.predictionActions[key] === "replace") state.predictionActions[key] = "keep";
+  });
+  state.activeMaskId = null;
   updateAnnotationToolbar();
   redrawCanvas();
+  renderMaskSidebar();
   queueAnnotationSave();
+});
+
+deleteSelectedMaskBtn?.addEventListener("click", () => {
+  deleteSelectedMask();
 });
 
 // CSV controls
@@ -1456,8 +2330,21 @@ window.addEventListener("keydown", async (event) => {
 
   try {
     if (event.key === "Escape") {
+      selectMask(null);
       exitDrawMode();
       return;
+    }
+    if (state.sam2Mode) {
+      if (event.key.toLowerCase() === "z") {
+        setSam2PromptType("positive");
+        showToast("SAM3 prompt mode: Include");
+        return;
+      }
+      if (event.key.toLowerCase() === "x") {
+        setSam2PromptType("negative");
+        showToast("SAM3 prompt mode: Exclude");
+        return;
+      }
     }
     // Block nav/review shortcuts while actively drawing
     if (state.drawMode) return;
@@ -1472,11 +2359,17 @@ window.addEventListener("keydown", async (event) => {
     } else if (event.key.toLowerCase() === "d" || event.key === "ArrowRight") {
       navigate(1);
     } else if (event.key.toLowerCase() === "c") {
-      await updateDecision("correct"); showToast("Marked correct.");
+      if (await updateDecision("correct")) showToast("Marked correct.");
     } else if (event.key.toLowerCase() === "w") {
-      await updateDecision("wrong"); showToast("Marked wrong — draw polygon corrections below.");
+      if (await updateDecision("wrong")) showToast("Marked wrong — draw polygon corrections below.");
     } else if (event.key.toLowerCase() === "u") {
-      await updateDecision("unreviewed"); showToast("Cleared review state.");
+      if (await updateDecision("unreviewed")) showToast("Cleared review state.");
+    } else if (event.key === "Delete" || event.key === "Backspace") {
+      if (state.sam2Mode || hasPendingSam2Draft()) {
+        undoSam2Prompt();
+      } else if (state.activeMaskId) {
+        deleteSelectedMask();
+      }
     }
   } catch (err) {
     showToast(err.message);
@@ -1490,8 +2383,9 @@ window.addEventListener("keydown", async (event) => {
 const taskCtx = { task: null, user: null }; // populated by initFromTask
 
 async function initFromTask(taskInfo) {
+  if (state.taskInitPending) return;
+  state.taskInitPending = true;
   const navTitle = document.getElementById("task-nav-title");
-  const navStatus = document.getElementById("task-nav-status");
   taskCtx.user = taskInfo.user || {};
 
   let task;
@@ -1501,6 +2395,7 @@ async function initFromTask(taskInfo) {
   } catch (err) {
     if (navTitle) navTitle.textContent = "Task not found";
     showToast(err.message || "Task fetch failed.");
+    state.taskInitPending = false;
     return;
   }
 
@@ -1516,6 +2411,7 @@ async function initFromTask(taskInfo) {
 
   if (!task.folder_path) {
     showToast("This task has no image folder yet — ask the reviewer to set one.");
+    state.taskInitPending = false;
     return;
   }
 
@@ -1523,25 +2419,39 @@ async function initFromTask(taskInfo) {
     await loadFolder(task.folder_path);
   } catch (err) {
     showToast(`Could not load folder: ${err.message}`);
+    state.taskInitPending = false;
     return;
   }
 
   // Optional links — failures show a toast but don't block reviewing.
   if (task.csv_path) {
-    try { await linkCsvByPath(task.csv_path); }
-    catch (err) { showToast(`CSV link failed: ${err.message}`); }
+    if (state.session?.csv_path === task.csv_path) {
+      csvPathInput.value = task.csv_path;
+      renderSummary();
+    } else {
+      try { await linkCsvByPath(task.csv_path); }
+      catch (err) { showToast(`CSV link failed: ${err.message}`); }
+    }
   }
 
   if (task.scale_profile_path) {
-    try { await linkScaleProfile(task.scale_profile_path); }
-    catch (err) { showToast(`Scale profile link failed: ${err.message}`); }
+    if (state.session?.scale_profile_path === task.scale_profile_path) {
+      scaleProfilePathInput.value = task.scale_profile_path;
+      renderSummary();
+    } else {
+      try { await linkScaleProfile(task.scale_profile_path); }
+      catch (err) { showToast(`Scale profile link failed: ${err.message}`); }
+    }
   }
 
   if (task.target_folder_path) {
+    if (state.session) {
+      state.session.target_folder_path = task.target_folder_path;
+    }
     targetFolderPathInput.value = task.target_folder_path;
-    try { await saveTargetFolderPath(); }
-    catch (err) { showToast(`Target folder failed: ${err.message}`); }
+    renderSummary();
   }
+  state.taskInitPending = false;
 }
 
 // ── Task header / action bar / comments ─────────────────────────────────────
@@ -1581,6 +2491,7 @@ function renderTaskHeader() {
 
   if (role === "L2" && isAssignee && ["in_progress","assigned","returned"].includes(status)) {
     btns.appendChild(makeActionBtn("Submit for QC", "btn-success", async () => {
+      if (!ensureNoPendingSam2Draft("submit this task")) return;
       if (!confirm("Submit this task for QC? You won't be able to edit it after.")) return;
       const res = await api(`/api/tasks/${task.id}/submit`, { method: "POST", body: "{}" });
       taskCtx.task = (await res.json()).task;
@@ -1624,6 +2535,8 @@ function makeActionBtn(label, btnClass, onClick) {
 }
 
 function wireTaskActions() {
+  if (state.taskActionsBound) return;
+  state.taskActionsBound = true;
   // Comments modal
   const commentsBtn = document.getElementById("task-comments-btn");
   const commentsModal = document.getElementById("comments-modal");

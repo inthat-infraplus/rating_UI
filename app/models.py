@@ -43,12 +43,21 @@ class PolygonPoint(BaseModel):
     y: float  # normalized [0, 1] relative to image natural height
 
 
+class NormalizedBox(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
 class PolygonAnnotation(BaseModel):
     id: str
     class_label: str
     points: list[PolygonPoint]
     value: float | None = None   # Real-world measurement (m or m²) from scale profile
     unit: str = ""               # "m" for crack length, "m²" for area classes
+    source_object_id: int | None = None
+    merge_action: str = Field(default="add", pattern="^(add|replace)$")
 
 
 class ImageAnnotationUpdateRequest(BaseModel):
@@ -73,15 +82,21 @@ class AreaCalculationRequest(BaseModel):
 
 
 class Sam2SegmentRequest(BaseModel):
-    """Click-to-segment with SAM2. `points` are normalized 0..1 image coords;
-    `labels` are 1 for foreground (include) / 0 for background (exclude),
-    one per point. Either omit `labels` or pass the same length as points."""
+    """Point/box prompt request for interactive SAM segmentation.
+
+    `points` are normalized 0..1 image coords; `labels` are 1 for
+    foreground (include) / 0 for background (exclude), one per point.
+    `box` is an optional normalized xyxy box prompt.
+    """
     folder_path: str = Field(..., min_length=1)
     relative_path: str = Field(..., min_length=1)
-    points: list[PolygonPoint]
+    points: list[PolygonPoint] = Field(default_factory=list)
     labels: list[int] | None = None
+    box: NormalizedBox | None = None
     image_natural_width: int
     image_natural_height: int
+    correction_mode: str = Field(default="patch", pattern="^(patch|redraw_all)$")
+    prediction_actions: dict[str, str] = Field(default_factory=dict)
 
 
 class PredictionBox(BaseModel):
@@ -94,6 +109,7 @@ class PredictionBox(BaseModel):
     x2: int = 0
     y2: int = 0
     confidence: float = 0.0
+    action: str = Field(default="keep", pattern="^(keep|replace|delete)$")
 
 
 class ImageRecord(BaseModel):
@@ -109,6 +125,7 @@ class ImageRecord(BaseModel):
     prediction_boxes: list[PredictionBox] = Field(default_factory=list)
     image_natural_width: int | None = None
     image_natural_height: int | None = None
+    correction_mode: str = Field(default="patch", pattern="^(patch|redraw_all)$")
 
 
 class SessionSummary(BaseModel):

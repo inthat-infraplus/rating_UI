@@ -27,6 +27,7 @@ from .models import (
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
 DEFAULT_UI_STATE = UiState()
+DEFAULT_SCALE_PROFILE_PATH = Path(__file__).resolve().parent.parent / "scale_profile" / "scale_profile.csv"
 
 
 def utc_now_iso() -> str:
@@ -107,6 +108,17 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+def _normalize_correction_mode(value: Any) -> str:
+    return "redraw_all" if str(value or "").strip().lower() == "redraw_all" else "patch"
+
+
+def _normalize_prediction_action(value: Any) -> str:
+    action = str(value or "").strip().lower()
+    if action in {"replace", "delete"}:
+        return action
+    return "keep"
+
+
 ScaleProfile = dict[int, tuple[float, float]]  # {row_index: (x_scale, y_scale)}
 
 
@@ -137,6 +149,13 @@ def load_scale_profile(scale_profile_path: str) -> ScaleProfile:
             except (KeyError, ValueError, TypeError):
                 continue
     return profile
+
+
+def default_scale_profile_path() -> Path | None:
+    path = DEFAULT_SCALE_PROFILE_PATH.resolve()
+    if not path.exists() or not path.is_file():
+        return None
+    return path
 
 
 def _calculate_polygon_metrics(
@@ -428,6 +447,21 @@ class ReviewStore:
     session_key: str
     state: dict[str, Any]
 
+    def _apply_default_scale_profile(self) -> bool:
+        if self.state.get("scale_profile_path"):
+            return False
+        default_path = default_scale_profile_path()
+        if default_path is None:
+            return False
+        profile = load_scale_profile(str(default_path))
+        if not profile:
+            return False
+        self.state["scale_profile_path"] = str(default_path)
+        self.state["scale_profile"] = [
+            [k, v[0], v[1]] for k, v in sorted(profile.items())
+        ]
+        return True
+
     @classmethod
     def open(cls, folder_path: str) -> "ReviewStore":
         folder = normalize_folder(folder_path)
@@ -460,7 +494,14 @@ class ReviewStore:
         state.setdefault("scale_profile", None)
         state.setdefault("images", {})
         state.setdefault("ui_state", DEFAULT_UI_STATE.model_dump())
-        return cls(folder=folder, state_path=state_path, session_key=session_key, state=state)
+        for image_state in state["images"].values():
+            if isinstance(image_state, dict):
+                image_state.setdefault("correction_mode", "patch")
+                image_state.setdefault("prediction_actions", {})
+        store = cls(folder=folder, state_path=state_path, session_key=session_key, state=state)
+        if store._apply_default_scale_profile():
+            store.save()
+        return store
 
     def save(self) -> None:
         self.state["updated_at"] = utc_now_iso()
@@ -485,10 +526,21 @@ class ReviewStore:
             stored = self._record_for(relative_path)
             decision = Decision(stored.get("decision", Decision.UNREVIEWED.value))
             filename = Path(relative_path).name
+            correction_mode = _normalize_correction_mode(stored.get("correction_mode"))
+            prediction_actions = {
+                str(key): _normalize_prediction_action(value)
+                for key, value in (stored.get("prediction_actions") or {}).items()
+            }
 
             # Load prediction boxes from linked CSV
             raw_boxes = csv_rows.get(filename, [])
-            prediction_boxes = [PredictionBox(**box) for box in raw_boxes]
+            prediction_boxes = [
+                PredictionBox(
+                    **box,
+                    action=prediction_actions.get(str(box.get("object_id", "")), "keep"),
+                )
+                for box in raw_boxes
+            ]
 
             # Load polygon annotations (including real-world value/unit if calculated)
             raw_polygons = stored.get("polygons", [])
@@ -499,6 +551,8 @@ class ReviewStore:
                     points=[PolygonPoint(**p) for p in poly.get("points", [])],
                     value=poly.get("value"),
                     unit=poly.get("unit", ""),
+                    source_object_id=poly.get("source_object_id"),
+                    merge_action="replace" if str(poly.get("merge_action", "add")).lower() == "replace" else "add",
                 )
                 for poly in raw_polygons
             ]
@@ -520,6 +574,7 @@ class ReviewStore:
                     prediction_boxes=prediction_boxes,
                     image_natural_width=stored.get("image_natural_width"),
                     image_natural_height=stored.get("image_natural_height"),
+                    correction_mode=correction_mode,
                 )
             )
 
@@ -648,18 +703,33 @@ class ReviewStore:
         polygons: list[dict[str, Any]],
         image_natural_width: int,
         image_natural_height: int,
+        correction_mode: str = "patch",
+        prediction_actions: dict[str, str] | None = None,
     ) -> SessionPayload:
         """Store polygon annotations for a single image."""
         validate_relative_path(self.folder, relative_path)
         image_state = self.state["images"].setdefault(relative_path, {})
-        image_state["polygons"] = polygons
+        normalized_actions = {
+            str(key): _normalize_prediction_action(value)
+            for key, value in (prediction_actions or {}).items()
+        }
+        normalized_polygons = []
+        for poly in polygons:
+            normalized_polygons.append({
+                **poly,
+                "source_object_id": poly.get("source_object_id"),
+                "merge_action": "replace" if str(poly.get("merge_action", "add")).lower() == "replace" else "add",
+            })
+        image_state["polygons"] = normalized_polygons
         image_state["image_natural_width"] = image_natural_width
         image_state["image_natural_height"] = image_natural_height
+        image_state["correction_mode"] = _normalize_correction_mode(correction_mode)
+        image_state["prediction_actions"] = normalized_actions
         self.save()
         return self.load_session()
 
     def export_updated_csv(self) -> tuple[Path, str, int]:
-        """Generate updated CSV combining original predictions with polygon corrections."""
+        """Generate updated CSV combining original predictions with patch/redraw corrections."""
         csv_path_str = self.state.get("csv_path")
         if not csv_path_str:
             raise ValueError("No CSV linked to this session. Link a results CSV first.")
@@ -687,9 +757,48 @@ class ReviewStore:
         filename_to_state: dict[str, dict[str, Any]] = {}
         for rel_path, img_state in self.state["images"].items():
             filename_to_state[Path(rel_path).name] = img_state
+            if Path(rel_path).name not in rows_by_filename:
+                filename_order.append(Path(rel_path).name)
 
         output_rows: list[dict[str, Any]] = []
         replaced_count = 0
+
+        def polygon_bbox(points: list[dict[str, Any]], nat_w: int, nat_h: int) -> tuple[int, int, int, int]:
+            if not points or nat_w <= 0 or nat_h <= 0:
+                return 0, 0, 0, 0
+            xs = [p["x"] * nat_w for p in points]
+            ys = [p["y"] * nat_h for p in points]
+            return int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
+
+        def export_row_for_polygon(
+            fname: str,
+            poly: dict[str, Any],
+            nat_w: int,
+            nat_h: int,
+            object_id: int,
+        ) -> dict[str, Any]:
+            points = poly.get("points", [])
+            class_label = poly.get("class_label", "")
+            stored_value = poly.get("value")
+            stored_unit = poly.get("unit", "")
+            x1, y1, x2, y2 = polygon_bbox(points, nat_w, nat_h)
+            unit = stored_unit or ("m" if class_label.lower() == "crack" else "m^2")
+            export_value = "" if stored_value is None else stored_value
+            return {
+                "Image Filename": fname,
+                "Object ID": object_id,
+                "Class": class_label,
+                "Value": export_value,
+                "Unit": unit,
+                "X1 (px)": x1,
+                "Y1 (px)": y1,
+                "X2 (px)": x2,
+                "Y2 (px)": y2,
+                "Confidence": "1.0",
+                "Polygon Points": json.dumps(
+                    [{"x": round(p["x"], 6), "y": round(p["y"], 6)} for p in points]
+                ),
+            }
 
         for fname in filename_order:
             img_state = filename_to_state.get(fname, {})
@@ -697,52 +806,68 @@ class ReviewStore:
             polygons = img_state.get("polygons", [])
             nat_w = img_state.get("image_natural_width", 0)
             nat_h = img_state.get("image_natural_height", 0)
+            correction_mode = _normalize_correction_mode(img_state.get("correction_mode"))
+            prediction_actions = {
+                str(key): _normalize_prediction_action(value)
+                for key, value in (img_state.get("prediction_actions") or {}).items()
+            }
+            original_rows_for_file = rows_by_filename.get(fname, [])
+            original_ids = [_safe_int(row.get("Object ID", 0)) for row in original_rows_for_file]
+            next_object_id = max(original_ids, default=0) + 1
 
-            if decision == "wrong" and polygons and nat_w > 0 and nat_h > 0:
-                # Replace original rows with polygon correction rows
-                replaced_count += 1
-                for i, poly in enumerate(polygons, start=1):
-                    points = poly.get("points", [])
-                    class_label = poly.get("class_label", "")
-                    stored_value = poly.get("value")  # Real-world value if scale profile was used
-                    stored_unit = poly.get("unit", "")
+            replace_polygons_by_object: dict[str, dict[str, Any]] = {}
+            add_polygons: list[dict[str, Any]] = []
+            for poly in polygons:
+                merge_action = "replace" if str(poly.get("merge_action", "add")).lower() == "replace" else "add"
+                source_object_id = poly.get("source_object_id")
+                if merge_action == "replace" and source_object_id is not None:
+                    replace_polygons_by_object[str(source_object_id)] = poly
+                else:
+                    add_polygons.append(poly)
 
-                    if points:
-                        xs = [p["x"] * nat_w for p in points]
-                        ys = [p["y"] * nat_h for p in points]
-                        x1, y1 = int(min(xs)), int(min(ys))
-                        x2, y2 = int(max(xs)), int(max(ys))
-                    else:
-                        x1 = y1 = x2 = y2 = 0
+            has_merge_changes = (
+                decision == "wrong"
+                or bool(polygons)
+                or any(action != "keep" for action in prediction_actions.values())
+                or correction_mode == "redraw_all"
+            )
 
-                    # Use stored real-world value if available; fall back to unit label only
-                    if stored_unit:
-                        unit = stored_unit
-                    else:
-                        unit = "m" if class_label.lower() == "crack" else "m^2"
-                    export_value = "" if stored_value is None else stored_value
-
-                    output_rows.append({
-                        "Image Filename": fname,
-                        "Object ID": i,
-                        "Class": class_label,
-                        "Value": export_value,
-                        "Unit": unit,
-                        "X1 (px)": x1,
-                        "Y1 (px)": y1,
-                        "X2 (px)": x2,
-                        "Y2 (px)": y2,
-                        "Confidence": "1.0",
-                        "Polygon Points": json.dumps(
-                            [{"x": round(p["x"], 6), "y": round(p["y"], 6)} for p in points]
-                        ),
-                    })
-            else:
-                # Keep original rows unchanged
-                for orig_row in rows_by_filename[fname]:
+            if not has_merge_changes:
+                for orig_row in original_rows_for_file:
                     out = dict(orig_row)
-                    out["Polygon Points"] = ""
+                    out["Polygon Points"] = out.get("Polygon Points", "")
                     output_rows.append(out)
+                continue
+
+            replaced_count += 1
+
+            if correction_mode == "redraw_all":
+                for poly in polygons:
+                    output_rows.append(export_row_for_polygon(fname, poly, nat_w, nat_h, next_object_id))
+                    next_object_id += 1
+                continue
+
+            for orig_row in original_rows_for_file:
+                object_id = _safe_int(orig_row.get("Object ID", 0))
+                action = prediction_actions.get(str(object_id), "keep")
+                if action == "delete":
+                    continue
+                if action == "replace":
+                    replacement = replace_polygons_by_object.get(str(object_id))
+                    if replacement is not None:
+                        output_rows.append(export_row_for_polygon(fname, replacement, nat_w, nat_h, object_id))
+                    else:
+                        out = dict(orig_row)
+                        out["Polygon Points"] = out.get("Polygon Points", "")
+                        output_rows.append(out)
+                    continue
+                out = dict(orig_row)
+                out["Polygon Points"] = out.get("Polygon Points", "")
+                output_rows.append(out)
+
+            for poly in add_polygons:
+                output_rows.append(export_row_for_polygon(fname, poly, nat_w, nat_h, next_object_id))
+                next_object_id += 1
 
         if not output_rows:
             raise ValueError("No data to export.")

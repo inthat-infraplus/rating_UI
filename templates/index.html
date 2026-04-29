@@ -334,6 +334,12 @@
             <p class="viewer-subtitle mb-0" id="viewer-subtitle">Complete Step 1 above, then images will appear here for review.</p>
           </div>
           <div class="viewer-actions">
+            <div class="zoom-controls">
+              <button class="btn btn-outline-secondary btn-sm" id="zoom-out-btn" type="button">-</button>
+              <button class="btn btn-outline-secondary btn-sm" id="zoom-reset-btn" type="button">100%</button>
+              <button class="btn btn-outline-secondary btn-sm" id="zoom-in-btn" type="button">+</button>
+              <span class="zoom-value" id="zoom-value">100%</span>
+            </div>
             <button class="btn btn-outline-secondary" id="prev-btn" type="button" disabled>← Prev</button>
             <button class="btn btn-outline-secondary" id="next-btn" type="button" disabled>Next →</button>
           </div>
@@ -348,6 +354,7 @@
           <span class="bbox-legend" id="bbox-legend"></span>
         </div>
 
+        <div class="viewer-workspace">
         <div class="image-stage" id="image-stage">
           <div class="image-canvas-wrap" id="image-canvas-wrap">
             <img alt="Prediction review preview" id="main-image" />
@@ -364,6 +371,31 @@
         </div>
 
         <!-- Annotation toolbar — visible only when current image is marked Wrong -->
+        <aside class="mask-sidebar" id="mask-sidebar">
+          <div class="correction-mode-panel">
+            <div class="mask-sidebar-kicker">Correction Mode</div>
+            <div class="correction-mode-actions">
+              <button class="btn btn-sm btn-outline-primary active" id="correction-mode-patch-btn" type="button">Patch Existing</button>
+              <button class="btn btn-sm btn-outline-primary" id="correction-mode-redraw-btn" type="button">Redraw Entire Image</button>
+            </div>
+          </div>
+          <div class="prediction-sidebar" id="prediction-sidebar">
+            <div class="mask-sidebar-kicker">Original Detections</div>
+            <div class="mask-sidebar-meta" id="prediction-sidebar-meta">No original detections linked.</div>
+            <div class="prediction-list" id="prediction-list"></div>
+          </div>
+          <div class="mask-sidebar-head">
+            <div>
+              <div class="mask-sidebar-kicker">Mask List</div>
+              <h3 class="mask-sidebar-title">Objects on this image</h3>
+            </div>
+            <span class="mask-sidebar-count" id="mask-sidebar-count">0</span>
+          </div>
+          <div class="mask-sidebar-meta" id="mask-sidebar-meta">No masks yet.</div>
+          <div class="mask-list" id="mask-list"></div>
+        </aside>
+        </div>
+
         <div class="annotation-toolbar" id="annotation-toolbar" style="display:none">
           <div class="annot-left">
             <span class="annot-label">Draw correction polygon:</span>
@@ -376,16 +408,33 @@
             </select>
             <button class="btn btn-sm btn-outline-primary" id="draw-polygon-btn" type="button">✏️ Draw Polygon</button>
             <button class="btn btn-sm btn-outline-info" id="sam2-tool-btn" type="button"
-                    title="AI-assist: click on the object you want to outline" disabled>
-              🪄 SAM2
+                    title="AI-assist: add point prompts or draw a box to segment with SAM3" disabled>
+              🪄 SAM3
             </button>
+            <div class="sam2-controls" id="sam2-controls" style="display:none">
+              <span class="sam2-controls-label">Point Prompts</span>
+              <div class="btn-group btn-group-sm sam2-prompt-source" role="group" aria-label="SAM3 prompt source">
+                <button class="btn btn-outline-primary" id="sam2-point-mode-btn" type="button">Point</button>
+                <button class="btn btn-outline-primary" id="sam2-box-mode-btn" type="button">Box</button>
+              </div>
+              <div class="btn-group btn-group-sm sam2-prompt-toggle" role="group" aria-label="SAM3 prompt type">
+                <button class="btn btn-outline-success" id="sam2-positive-btn" type="button">＋ Include</button>
+                <button class="btn btn-outline-danger" id="sam2-negative-btn" type="button">－ Exclude</button>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary" id="sam2-undo-btn" type="button">Undo Prompt</button>
+              <button class="btn btn-sm btn-outline-secondary" id="sam2-clear-btn" type="button">Clear Prompts</button>
+              <button class="btn btn-sm btn-success" id="sam2-confirm-btn" type="button" disabled>Confirm Mask</button>
+            </div>
             <button class="btn btn-sm btn-outline-secondary" id="undo-polygon-btn" type="button">Undo</button>
             <button class="btn btn-sm btn-outline-danger" id="clear-polygons-btn" type="button">Clear All</button>
+            <button class="btn btn-sm btn-danger" id="delete-selected-mask-btn" type="button" disabled>Delete Selected</button>
           </div>
           <div class="annot-right">
             <span class="annot-count" id="polygon-count">0 polygons</span>
             <span class="annot-hint" id="annot-hint" style="display:none">Click to place points &nbsp;·&nbsp; double-click or click first point to close</span>
-            <span class="annot-hint annot-hint-sam2" id="annot-hint-sam2" style="display:none">Click anywhere on the object — SAM2 will outline it for you</span>
+            <span class="annot-hint annot-hint-sam2" id="annot-hint-sam2" style="display:none">Add green/red points or draw a box prompt — SAM3 updates the preview live</span>
+            <span class="annot-hint annot-hint-sam2-live" id="annot-hint-sam2-live" style="display:none">Preview only — use Confirm Mask to commit this label</span>
+            <span class="annot-count sam2-prompt-count" id="sam2-prompt-count" style="display:none">0 prompts</span>
           </div>
         </div>
 

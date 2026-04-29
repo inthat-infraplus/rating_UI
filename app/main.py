@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from sqlalchemy import select
 
-from . import sam2_service, task_service
+from . import sam3_service, task_service
 from .auth import (
     authenticate,
     current_user,
@@ -414,6 +414,8 @@ async def update_annotations(request: ImageAnnotationUpdateRequest) -> JSONRespo
             [poly.model_dump(mode="json") for poly in request.polygons],
             request.image_natural_width,
             request.image_natural_height,
+            request.correction_mode,
+            request.prediction_actions,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -482,27 +484,32 @@ async def calculate_area(request: AreaCalculationRequest) -> JSONResponse:
     return JSONResponse(content={"value": value, "unit": unit})
 
 
-@app.get("/api/sam2/status")
-async def sam2_status(request: Request) -> JSONResponse:
-    """Cheap probe: does the server have SAM2 ready to go? Used by the
-    front-end to enable/disable the 🪄 SAM2 button at page load. We require
-    auth so anonymous users don't fingerprint the install footprint."""
+@app.get("/api/sam3/status")
+async def sam3_status(request: Request) -> JSONResponse:
+    """Cheap probe: does the server have SAM3 ready to go?"""
     require_user(request)
-    ok, reason = sam2_service.is_available()
+    ok, reason = sam3_service.is_available()
     return JSONResponse(
         content={
             "available": ok,
             "reason": reason,
-            "model_path": str(sam2_service.model_path()),
+            "model_path": str(sam3_service.model_path()),
+            "device": sam3_service.preferred_device(),
+            "engine": "sam3",
         }
     )
 
 
-@app.post("/api/sam2/segment")
-async def sam2_segment(request: Request, payload: Sam2SegmentRequest) -> JSONResponse:
-    """Run SAM2 on one click (or set of clicks) and return polygon vertices
-    in normalized 0..1 coords, ready to drop into the existing polygon
-    storage. Auth-required because the model is expensive to invoke."""
+@app.get("/api/sam2/status")
+async def sam2_status_alias(request: Request) -> JSONResponse:
+    """Backward-compatible alias for older front-end builds."""
+    return await sam3_status(request)
+
+
+@app.post("/api/sam3/segment")
+async def sam3_segment(request: Request, payload: Sam2SegmentRequest) -> JSONResponse:
+    """Run SAM3 Tracker on point and/or box prompts and return polygons in
+    normalized 0..1 coordinates for the existing annotation flow."""
     require_user(request)
 
     # Reuse the same path-validation helpers /api/image uses, so a malicious
@@ -514,21 +521,25 @@ async def sam2_segment(request: Request, payload: Sam2SegmentRequest) -> JSONRes
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     points_norm = [(p.x, p.y) for p in payload.points]
-    if not points_norm:
+    box_norm = None
+    if payload.box is not None:
+        box_norm = (payload.box.x1, payload.box.y1, payload.box.x2, payload.box.y2)
+    if not points_norm and box_norm is None:
         raise HTTPException(
-            status_code=400, detail="At least one click point is required."
+            status_code=400, detail="At least one point or box prompt is required."
         )
 
     try:
         result = await run_in_threadpool(
-            sam2_service.segment_at_points,
+            sam3_service.segment_with_prompts,
             image_path,
             points_norm,
             payload.labels,
+            box_norm,
             image_natural_width=payload.image_natural_width,
             image_natural_height=payload.image_natural_height,
         )
-    except sam2_service.Sam2Unavailable as exc:
+    except sam3_service.Sam3Unavailable as exc:
         # 503 (service unavailable) — distinguishes "feature not configured"
         # from request validation errors and lets the front-end surface the
         # install hint to the operator.
@@ -544,8 +555,16 @@ async def sam2_segment(request: Request, payload: Sam2SegmentRequest) -> JSONRes
             "polygons": [{"points": p.points} for p in result.polygons],
             "duration_ms": result.duration_ms,
             "model_path": result.model_path,
+            "device": result.device,
+            "engine": "sam3",
         }
     )
+
+
+@app.post("/api/sam2/segment")
+async def sam2_segment_alias(request: Request, payload: Sam2SegmentRequest) -> JSONResponse:
+    """Backward-compatible alias for older front-end builds."""
+    return await sam3_segment(request, payload)
 
 
 @app.post("/api/export-updated-csv")
