@@ -41,6 +41,7 @@ from .models import (
     CsvLinkRequest,
     FolderRequest,
     ImageAnnotationUpdateRequest,
+    ReviewBatchUpdateRequest,
     ReviewUpdateRequest,
     Sam2SegmentRequest,
     ScaleProfileLinkRequest,
@@ -276,6 +277,20 @@ async def update_review(request: ReviewUpdateRequest) -> JSONResponse:
         session = await run_in_threadpool(
             ReviewStore.open(request.folder_path).update_decision,
             request.relative_path,
+            request.decision,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _sync_task_progress(request.folder_path, session)
+    return JSONResponse(content={"session": to_payload_dict(session)})
+
+
+@app.post("/api/review/batch")
+async def update_review_batch(request: ReviewBatchUpdateRequest) -> JSONResponse:
+    try:
+        session = await run_in_threadpool(
+            ReviewStore.open(request.folder_path).update_decisions_batch,
+            request.relative_paths,
             request.decision,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:

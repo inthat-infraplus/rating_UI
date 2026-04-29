@@ -119,6 +119,17 @@ def _normalize_prediction_action(value: Any) -> str:
     return "keep"
 
 
+def _normalize_filter_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode == "selected":
+        return "wrong"
+    if mode == "reviewed":
+        return "completed"
+    if mode in {"all", "unreviewed", "wrong", "completed"}:
+        return mode
+    return "unreviewed"
+
+
 ScaleProfile = dict[int, tuple[float, float]]  # {row_index: (x_scale, y_scale)}
 
 
@@ -290,6 +301,21 @@ def infer_export_base_name(images: list[ImageRecord], session_key: str) -> str:
         return f"rating_{first_tokens.pop()}"
 
     return f"rating_mixed_{session_key}"
+
+
+def _new_state_payload(folder: Path, session_key: str) -> dict[str, Any]:
+    timestamp = utc_now_iso()
+    return {
+        "folder_path": str(folder),
+        "session_key": session_key,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "target_folder_path": None,
+        "csv_path": None,
+        "csv_rows": {},
+        "images": {},
+        "ui_state": DEFAULT_UI_STATE.model_dump(),
+    }
 
 
 # ── Annotation rendering helpers ──────────────────────────────────────────────
@@ -470,20 +496,36 @@ class ReviewStore:
         state_path.parent.mkdir(parents=True, exist_ok=True)
 
         if state_path.exists():
-            state = json.loads(state_path.read_text(encoding="utf-8"))
+            raw_text = state_path.read_text(encoding="utf-8")
+            try:
+                state = json.loads(raw_text)
+            except json.JSONDecodeError:
+                # Recovery path for partially-corrupted state files:
+                # 1) keep a sidecar copy for manual inspection
+                # 2) salvage first JSON object when possible
+                # 3) otherwise start a fresh state
+                backup_name = f"{state_path.stem}.corrupt-{datetime.now().strftime('%Y%m%d_%H%M%S')}{state_path.suffix}"
+                backup_path = state_path.with_name(backup_name)
+                try:
+                    backup_path.write_text(raw_text, encoding="utf-8")
+                except Exception:
+                    pass
+
+                recovered: dict[str, Any] | None = None
+                stripped = raw_text.lstrip("\ufeff \t\r\n")
+                try:
+                    decoded, _ = json.JSONDecoder().raw_decode(stripped)
+                    if isinstance(decoded, dict):
+                        recovered = decoded
+                except Exception:
+                    recovered = None
+
+                state = recovered if recovered is not None else _new_state_payload(folder, session_key)
         else:
-            timestamp = utc_now_iso()
-            state = {
-                "folder_path": str(folder),
-                "session_key": session_key,
-                "created_at": timestamp,
-                "updated_at": timestamp,
-                "target_folder_path": None,
-                "csv_path": None,
-                "csv_rows": {},
-                "images": {},
-                "ui_state": DEFAULT_UI_STATE.model_dump(),
-            }
+            state = _new_state_payload(folder, session_key)
+
+        if not isinstance(state, dict):
+            state = _new_state_payload(folder, session_key)
 
         state["folder_path"] = str(folder)
         state["session_key"] = session_key
@@ -505,7 +547,10 @@ class ReviewStore:
 
     def save(self) -> None:
         self.state["updated_at"] = utc_now_iso()
-        self.state_path.write_text(json.dumps(self.state, indent=2), encoding="utf-8")
+        payload = json.dumps(self.state, indent=2)
+        tmp_path = self.state_path.with_suffix(f"{self.state_path.suffix}.tmp")
+        tmp_path.write_text(payload, encoding="utf-8")
+        os.replace(tmp_path, self.state_path)
 
     def _scan_images(self) -> list[str]:
         files = [
@@ -579,6 +624,7 @@ class ReviewStore:
             )
 
         ui_state = UiState(**self.state.get("ui_state", DEFAULT_UI_STATE.model_dump()))
+        ui_state.filter_mode = _normalize_filter_mode(ui_state.filter_mode)
         if ui_state.current_relative_path and ui_state.current_relative_path not in {
             item.relative_path for item in image_records
         }:
@@ -614,7 +660,7 @@ class ReviewStore:
 
         self.state["ui_state"] = {
             "current_relative_path": current_relative_path,
-            "filter_mode": filter_mode,
+            "filter_mode": _normalize_filter_mode(filter_mode),
         }
         self.save()
         return self.load_session()
@@ -725,6 +771,22 @@ class ReviewStore:
         image_state["image_natural_height"] = image_natural_height
         image_state["correction_mode"] = _normalize_correction_mode(correction_mode)
         image_state["prediction_actions"] = normalized_actions
+        self.save()
+        return self.load_session()
+
+    def update_decisions_batch(self, relative_paths: list[str], decision: Decision) -> SessionPayload:
+        if not relative_paths:
+            raise ValueError("At least one image path is required.")
+
+        for relative_path in relative_paths:
+            validate_relative_path(self.folder, relative_path)
+            image_state = self.state["images"].setdefault(relative_path, {})
+            image_state["decision"] = decision.value
+            if decision == Decision.UNREVIEWED:
+                image_state.pop("reviewed_at", None)
+            else:
+                image_state["reviewed_at"] = utc_now_iso()
+
         self.save()
         return self.load_session()
 

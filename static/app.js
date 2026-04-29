@@ -3,6 +3,10 @@ const state = {
   session: null,
   activeFilter: "unreviewed",
   currentRelativePath: null,
+  reviewMode: "decision",
+  autoAdvance: true,
+  theme: "dark",
+  queueCollapsed: true,
   correctionMode: "patch",
   predictionActions: {},
   activePredictionId: null,
@@ -17,9 +21,16 @@ const state = {
   baseImageHeight: 0,
   // annotation
   drawMode: false,
+  brushMode: false,
+  eraserMode: false,
+  brushSize: 20,
+  brushStrokeActive: false,
+  brushStrokePoints: [],
+  brushLastPoint: null,
   currentPolygon: [],      // [{x, y}] canvas-pixel coords, in-progress
   finishedPolygons: [],    // [{id, class_label, points:[{x,y}]}] canvas-pixel coords
   activeMaskId: null,
+  hoverMaskId: null,
   maskUiByImage: {},       // { [relativePath]: { [maskId]: { visible: bool } } }
   annotationSaveTimer: null,
   mousePt: null,           // {x, y} canvas-pixel, for preview line
@@ -59,6 +70,9 @@ const annotatedCount         = document.getElementById("annotated-count");
 const progressBar            = document.getElementById("progress-bar");
 const queueMeta              = document.getElementById("queue-meta");
 const queueList              = document.getElementById("queue-list");
+const queueCollapseBtn       = document.getElementById("queue-collapse-btn");
+const queueProgressInline    = document.getElementById("queue-progress-inline");
+const batchAcceptBtn         = document.getElementById("batch-accept-btn");
 const viewerTitle            = document.getElementById("viewer-title");
 const viewerSubtitle         = document.getElementById("viewer-subtitle");
 const zoomOutBtn             = document.getElementById("zoom-out-btn");
@@ -77,12 +91,31 @@ const prevBtn                = document.getElementById("prev-btn");
 const nextBtn                = document.getElementById("next-btn");
 const markCorrectBtn         = document.getElementById("mark-correct-btn");
 const markWrongBtn           = document.getElementById("mark-wrong-btn");
+const decisionDeleteBtn      = document.getElementById("decision-delete-btn");
 const clearBtn               = document.getElementById("clear-btn");
+const undoActionBtn          = document.getElementById("undo-action-btn");
 const toast                  = document.getElementById("toast");
+const reviewLayout           = document.querySelector(".review-layout");
+const viewerWorkspace        = document.querySelector(".viewer-workspace");
+const toggleQuickReviewBtn   = document.getElementById("toggle-quick-review-btn");
+const toggleThemeBtn         = document.getElementById("toggle-theme-btn");
+const toggleThemeNavBtn      = document.getElementById("toggle-theme-nav-btn");
+const toggleAutoAdvanceBtn   = document.getElementById("toggle-auto-advance-btn");
+const batchAcceptModal       = document.getElementById("batch-accept-modal");
+const batchAcceptClose       = document.getElementById("batch-accept-close");
+const batchAcceptCancel      = document.getElementById("batch-accept-cancel");
+const batchAcceptForm        = document.getElementById("batch-accept-form");
+const batchAcceptThreshold   = document.getElementById("batch-accept-threshold");
+const batchAcceptPreview     = document.getElementById("batch-accept-preview");
+const batchAcceptError       = document.getElementById("batch-accept-error");
 // annotation toolbar
 const annotationToolbar      = document.getElementById("annotation-toolbar");
 const classSelect            = document.getElementById("class-select");
 const drawPolygonBtn         = document.getElementById("draw-polygon-btn");
+const brushToolBtn           = document.getElementById("brush-tool-btn");
+const eraserToolBtn          = document.getElementById("eraser-tool-btn");
+const brushSizeInput         = document.getElementById("brush-size-input");
+const brushSizeValue         = document.getElementById("brush-size-value");
 const sam2ToolBtn            = document.getElementById("sam2-tool-btn");
 const sam2Controls           = document.getElementById("sam2-controls");
 const sam2PointModeBtn       = document.getElementById("sam2-point-mode-btn");
@@ -128,6 +161,7 @@ const scaleProfileFileInput   = document.getElementById("scale-profile-file-inpu
 const scaleStatusText         = document.getElementById("scale-status-text");
 
 const ctx = annotationCanvas.getContext("2d");
+if (brushSizeInput) state.brushSize = Math.max(2, Number(brushSizeInput.value || 20));
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 async function api(url, options = {}) {
@@ -224,15 +258,40 @@ function pointInPolygon(pt, points) {
 
 // ── Filter helpers ───────────────────────────────────────────────────────────
 function filterImages(images, filterMode) {
-  if (filterMode === "reviewed")   return images.filter((i) => i.reviewed);
+  if (filterMode === "reviewed" || filterMode === "completed") return images.filter((i) => i.reviewed);
   if (filterMode === "unreviewed") return images.filter((i) => !i.reviewed);
-  if (filterMode === "selected")   return images.filter((i) => i.selected);
+  if (filterMode === "selected" || filterMode === "wrong") return images.filter((i) => i.selected);
   return images;
 }
 
 function normalizeFilterMode(filterMode) {
-  if (filterMode === "reviewed" || filterMode === "selected") return filterMode;
+  if (filterMode === "reviewed") return "completed";
+  if (filterMode === "selected") return "wrong";
+  if (filterMode === "completed" || filterMode === "wrong") return filterMode;
   return "unreviewed";
+}
+
+function applyTheme() {
+  document.body.classList.toggle("task-theme-dark", state.theme === "dark");
+  const label = `Theme: ${state.theme === "dark" ? "Dark" : "Light"}`;
+  if (toggleThemeBtn) toggleThemeBtn.textContent = label;
+  if (toggleThemeNavBtn) toggleThemeNavBtn.textContent = label;
+}
+
+function applyReviewMode() {
+  const isQuick = state.reviewMode === "quick_review";
+  document.body.classList.toggle("quick-review-mode", isQuick);
+  if (viewerWorkspace) viewerWorkspace.classList.toggle("quick-review", isQuick);
+  if (toggleQuickReviewBtn) toggleQuickReviewBtn.textContent = `Quick Review: ${isQuick ? "On" : "Off"}`;
+}
+
+function applyQueueCollapse() {
+  if (reviewLayout) reviewLayout.classList.toggle("queue-collapsed", state.queueCollapsed);
+  if (queueCollapseBtn) queueCollapseBtn.textContent = state.queueCollapsed ? "Expand" : "Collapse";
+}
+
+function updateTopBarControls() {
+  if (toggleAutoAdvanceBtn) toggleAutoAdvanceBtn.textContent = `Auto-Advance: ${state.autoAdvance ? "On" : "Off"}`;
 }
 
 function currentImage() {
@@ -428,6 +487,21 @@ function polyColor(index) {
   return POLYGON_COLORS[index % POLYGON_COLORS.length];
 }
 
+function classOptions() {
+  if (!classSelect) return [];
+  return Array.from(classSelect.options).map((option) => ({
+    value: option.value,
+    label: option.textContent || option.value,
+  }));
+}
+
+function classOptionsMarkup(selectedValue) {
+  return classOptions().map((option) => {
+    const selected = option.value === selectedValue ? "selected" : "";
+    return `<option value="${escapeHtml(option.value)}" ${selected}>${escapeHtml(option.label)}</option>`;
+  }).join("");
+}
+
 // Draw a readable pill badge (dark background, white text + color accent dot)
 function drawPolygonBadge(cx, cy, classLabel, value, unit, accentColor) {
   const hasValue = value !== null && value !== undefined;
@@ -587,9 +661,31 @@ function isPolygonVisible(poly) {
 
 function selectMask(maskId) {
   state.activeMaskId = maskId;
+  state.hoverMaskId = maskId;
+  if (maskId) {
+    const activeMask = state.finishedPolygons.find((poly) => poly.id === maskId);
+    if (activeMask && classSelect) classSelect.value = activeMask.class_label;
+  }
   updateAnnotationToolbar();
   redrawCanvas();
   renderMaskSidebar();
+}
+
+async function setMaskClass(maskId, nextClassLabel) {
+  const poly = state.finishedPolygons.find((item) => item.id === maskId);
+  if (!poly) return;
+  if (!nextClassLabel || poly.class_label === nextClassLabel) return;
+
+  poly.class_label = nextClassLabel;
+  // Class switch invalidates cached metric until recomputed.
+  poly.value = null;
+  poly.unit = "";
+  if (classSelect) classSelect.value = nextClassLabel;
+
+  redrawCanvas();
+  renderMaskSidebar();
+  queueAnnotationSave();
+  await calculatePolygonArea(poly);
 }
 
 function hitTestFinishedMask(canvasPt) {
@@ -775,7 +871,10 @@ function renderMaskSidebar() {
           </div>
           <div class="mask-list-subtitle">${escapeHtml(poly.id)} · ${size} · ${mergeLabel}</div>
         </div>
-        <div class="mask-list-actions">
+                <div class="mask-list-actions">
+          <select class="form-select form-select-sm mask-class-select" data-mask-class-id="${escapeHtml(poly.id)}" title="Change class">
+            ${classOptionsMarkup(poly.class_label)}
+          </select>
           <button class="mask-icon-btn mask-visibility" type="button" data-mask-action="toggle" data-mask-id="${escapeHtml(poly.id)}" title="${visible ? "Hide mask" : "Show mask"}">${visible ? "👁" : "🙈"}</button>
           <button class="mask-icon-btn mask-delete" type="button" data-mask-action="delete" data-mask-id="${escapeHtml(poly.id)}" title="Delete mask">🗑</button>
         </div>
@@ -803,6 +902,18 @@ function renderMaskSidebar() {
       event.stopPropagation();
       selectMask(btn.dataset.maskId);
       deleteSelectedMask();
+    });
+  });
+  maskList.querySelectorAll("[data-mask-class-id]").forEach((selectEl) => {
+    selectEl.addEventListener("mousedown", (event) => event.stopPropagation());
+    selectEl.addEventListener("click", (event) => event.stopPropagation());
+    selectEl.addEventListener("change", async (event) => {
+      event.stopPropagation();
+      try {
+        await setMaskClass(selectEl.dataset.maskClassId, selectEl.value);
+      } catch (err) {
+        showToast(err.message);
+      }
     });
   });
 }
@@ -834,6 +945,23 @@ function redrawCanvas() {
     const cx = poly.points.reduce((s, p) => s + p.x, 0) / poly.points.length;
     const cy = poly.points.reduce((s, p) => s + p.y, 0) / poly.points.length;
     drawPolygonBadge(cx, cy, poly.class_label, poly.value, poly.unit, isActive ? "#1d4ed8" : color);
+  }
+
+  if ((state.brushMode || state.eraserMode) && state.brushStrokePoints.length) {
+    const strokeColor = state.eraserMode ? "rgba(239, 68, 68, 0.38)" : "rgba(37, 99, 235, 0.24)";
+    const lineColor = state.eraserMode ? "rgba(239, 68, 68, 0.85)" : "rgba(37, 99, 235, 0.92)";
+    const radius = Math.max(2, state.brushSize / 2);
+    ctx.save();
+    ctx.fillStyle = strokeColor;
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1.2;
+    for (const p of state.brushStrokePoints) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // Draw SAM2 preview polygons before prompt markers so the control points
@@ -947,6 +1075,7 @@ function redrawCanvas() {
 
 // ── Polygon drawing logic ────────────────────────────────────────────────────
 function enterDrawMode() {
+  exitBrushTools();
   state.drawMode = true;
   state.currentPolygon = [];
   state.mousePt = null;
@@ -970,6 +1099,165 @@ function exitDrawMode() {
   drawPolygonBtn.classList.remove("active");
   annotHint.style.display = "none";
   redrawCanvas();
+}
+
+function enterBrushMode() {
+  if (state.sam2Mode) {
+    if (!ensureNoPendingSam2Draft("switch to brush tool")) return;
+    exitSam2Mode();
+  }
+  if (state.drawMode) exitDrawMode();
+  state.brushMode = true;
+  state.eraserMode = false;
+  state.brushStrokeActive = false;
+  state.brushStrokePoints = [];
+  state.brushLastPoint = null;
+  annotationCanvas.style.pointerEvents = "auto";
+  updateAnnotationToolbar();
+  redrawCanvas();
+}
+
+function enterEraserMode() {
+  if (state.sam2Mode) {
+    if (!ensureNoPendingSam2Draft("switch to eraser tool")) return;
+    exitSam2Mode();
+  }
+  if (state.drawMode) exitDrawMode();
+  state.eraserMode = true;
+  state.brushMode = false;
+  state.brushStrokeActive = false;
+  state.brushStrokePoints = [];
+  state.brushLastPoint = null;
+  annotationCanvas.style.pointerEvents = "auto";
+  updateAnnotationToolbar();
+  redrawCanvas();
+}
+
+function exitBrushTools() {
+  state.brushMode = false;
+  state.eraserMode = false;
+  state.brushStrokeActive = false;
+  state.brushStrokePoints = [];
+  state.brushLastPoint = null;
+}
+
+function clampToCanvasPoint(pt) {
+  return {
+    x: Math.max(0, Math.min(annotationCanvas.width, pt.x)),
+    y: Math.max(0, Math.min(annotationCanvas.height, pt.y)),
+  };
+}
+
+function pushBrushSample(point) {
+  const p = clampToCanvasPoint(point);
+  if (!state.brushStrokePoints.length) {
+    state.brushStrokePoints.push(p);
+    state.brushLastPoint = p;
+    return;
+  }
+  const last = state.brushLastPoint || state.brushStrokePoints[state.brushStrokePoints.length - 1];
+  const dx = p.x - last.x;
+  const dy = p.y - last.y;
+  const dist = Math.hypot(dx, dy);
+  const spacing = Math.max(1.5, state.brushSize * 0.22);
+  const steps = Math.max(1, Math.ceil(dist / spacing));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    state.brushStrokePoints.push({
+      x: last.x + dx * t,
+      y: last.y + dy * t,
+    });
+  }
+  state.brushLastPoint = p;
+}
+
+function circlePolygon(center, radius, segments = 40) {
+  const points = [];
+  for (let i = 0; i < segments; i++) {
+    const a = (Math.PI * 2 * i) / segments;
+    points.push(
+      clampToCanvasPoint({
+        x: center.x + Math.cos(a) * radius,
+        y: center.y + Math.sin(a) * radius,
+      }),
+    );
+  }
+  return points;
+}
+
+function buildBrushPolygon(points, radius) {
+  if (!points.length) return [];
+  if (points.length < 2) return circlePolygon(points[0], radius);
+
+  const left = [];
+  const right = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const prev = points[Math.max(0, i - 1)];
+    const next = points[Math.min(points.length - 1, i + 1)];
+    const dx = next.x - prev.x;
+    const dy = next.y - prev.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    left.push(clampToCanvasPoint({ x: p.x + nx * radius, y: p.y + ny * radius }));
+    right.push(clampToCanvasPoint({ x: p.x - nx * radius, y: p.y - ny * radius }));
+  }
+  return left.concat(right.reverse());
+}
+
+function commitBrushStrokeAsPolygon() {
+  if (!state.brushStrokePoints.length) return null;
+  const radius = Math.max(2, state.brushSize / 2);
+  const points = buildBrushPolygon(state.brushStrokePoints, radius);
+  if (points.length < 3) return null;
+  const poly = prepareCommittedPolygon(points);
+  poly.brush_generated = true;
+  state.finishedPolygons.push(poly);
+  return poly;
+}
+
+function maybeEraseBrushPolygons(point) {
+  const radius = Math.max(2, state.brushSize / 2);
+  const cx = point.x;
+  const cy = point.y;
+  const kept = [];
+  let changed = false;
+  for (const poly of state.finishedPolygons) {
+    if (!poly.brush_generated) {
+      kept.push(poly);
+      continue;
+    }
+    const bbox = poly.bbox || computePolygonBBox(poly.points);
+    if (
+      cx + radius < bbox.minX || cx - radius > bbox.maxX ||
+      cy + radius < bbox.minY || cy - radius > bbox.maxY
+    ) {
+      kept.push(poly);
+      continue;
+    }
+    let hit = false;
+    if (pointInPolygon(point, poly.points)) {
+      hit = true;
+    } else {
+      for (const vertex of poly.points) {
+        if (Math.hypot(vertex.x - cx, vertex.y - cy) <= radius) {
+          hit = true;
+          break;
+        }
+      }
+    }
+    if (hit) {
+      changed = true;
+      if (state.activeMaskId === poly.id) state.activeMaskId = null;
+      continue;
+    }
+    kept.push(poly);
+  }
+  if (changed) {
+    state.finishedPolygons = kept;
+    queueAnnotationSave();
+  }
 }
 
 // ── SAM2 AI-assist: click anywhere on an object → server returns polygon ─────
@@ -1011,6 +1299,7 @@ function enterSam2Mode() {
     if (!ensureNoPendingSam2Draft("switch to SAM3 point prompts")) return;
     exitDrawMode();
   }
+  if (state.brushMode || state.eraserMode) exitBrushTools();
   state.sam2Mode = true;
   annotationCanvas.classList.add("sam2-mode");
   annotationCanvas.style.pointerEvents = "auto";
@@ -1301,6 +1590,15 @@ async function calculatePolygonArea(poly) {
 let _clickTimer = null;
 
 annotationCanvas.addEventListener("mousedown", (e) => {
+  if (state.brushMode || state.eraserMode) {
+    state.brushStrokeActive = true;
+    state.brushStrokePoints = [];
+    state.brushLastPoint = null;
+    pushBrushSample(getCanvasPos(e));
+    if (state.eraserMode) maybeEraseBrushPolygons(getCanvasPos(e));
+    redrawCanvas();
+    return;
+  }
   if (!state.sam2Mode) return;
   if (state.sam2PromptSource === "box") {
     const canvasPt = getCanvasPos(e);
@@ -1316,6 +1614,7 @@ annotationCanvas.addEventListener("mousedown", (e) => {
 });
 
 annotationCanvas.addEventListener("click", (e) => {
+  if (state.brushMode || state.eraserMode) return;
   if (state.sam2Mode) {
     if (state.sam2PromptSource === "box") return;
     if (state.sam2SuppressClick) {
@@ -1370,6 +1669,13 @@ annotationCanvas.addEventListener("dblclick", (e) => {
 });
 
 annotationCanvas.addEventListener("mousemove", (e) => {
+  if ((state.brushMode || state.eraserMode) && state.brushStrokeActive) {
+    const point = getCanvasPos(e);
+    pushBrushSample(point);
+    if (state.eraserMode) maybeEraseBrushPolygons(point);
+    redrawCanvas();
+    return;
+  }
   if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
     state.sam2BoxDraftCurrent = getCanvasPos(e);
     redrawCanvas();
@@ -1394,6 +1700,21 @@ annotationCanvas.addEventListener("mousemove", (e) => {
 });
 
 annotationCanvas.addEventListener("mouseup", () => {
+  if (state.brushStrokeActive && (state.brushMode || state.eraserMode)) {
+    state.brushStrokeActive = false;
+    if (state.brushMode) {
+      const committed = commitBrushStrokeAsPolygon();
+      if (committed) {
+        queueAnnotationSave();
+        calculatePolygonArea(committed);
+      }
+    }
+    state.brushStrokePoints = [];
+    state.brushLastPoint = null;
+    redrawCanvas();
+    renderMaskSidebar();
+    return;
+  }
   if (!state.sam2Mode) return;
   if (state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
     commitSam2BoxDraft();
@@ -1406,6 +1727,21 @@ annotationCanvas.addEventListener("mouseup", () => {
 });
 
 window.addEventListener("mouseup", () => {
+  if (state.brushStrokeActive && (state.brushMode || state.eraserMode)) {
+    state.brushStrokeActive = false;
+    if (state.brushMode) {
+      const committed = commitBrushStrokeAsPolygon();
+      if (committed) {
+        queueAnnotationSave();
+        calculatePolygonArea(committed);
+      }
+    }
+    state.brushStrokePoints = [];
+    state.brushLastPoint = null;
+    redrawCanvas();
+    renderMaskSidebar();
+    return;
+  }
   if (!state.sam2Mode) return;
   if (state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
     commitSam2BoxDraft();
@@ -1418,6 +1754,10 @@ window.addEventListener("mouseup", () => {
 });
 
 annotationCanvas.addEventListener("mouseleave", () => {
+  if (state.brushStrokeActive && (state.brushMode || state.eraserMode)) {
+    redrawCanvas();
+    return;
+  }
   if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
     redrawCanvas();
     return;
@@ -1434,6 +1774,9 @@ annotationCanvas.addEventListener("mouseleave", () => {
 function updateAnnotationToolbar() {
   const count = state.finishedPolygons.length;
   polygonCountLabel.textContent = `${count} polygon${count !== 1 ? "s" : ""}`;
+  if (brushSizeValue) brushSizeValue.textContent = `${state.brushSize} px`;
+  brushToolBtn?.classList.toggle("active", state.brushMode);
+  eraserToolBtn?.classList.toggle("active", state.eraserMode);
 
   const sam2DraftActive = state.sam2Mode || hasPendingSam2Draft();
   if (sam2Controls) sam2Controls.style.display = sam2DraftActive ? "inline-flex" : "none";
@@ -1476,6 +1819,7 @@ function showAnnotationToolbar(show) {
   annotationCanvas.style.pointerEvents = show ? "auto" : "none";
   if (!show) {
     exitDrawMode();
+    exitBrushTools();
     resetSam2Draft();
     exitSam2Mode();
     state.activeMaskId = null;
@@ -1546,8 +1890,8 @@ function updateFilterButtons() {
 }
 
 function statusLabel(decision) {
-  if (decision === "correct") return "Correct";
-  if (decision === "wrong")   return "Wrong";
+  if (decision === "correct") return "Accepted";
+  if (decision === "wrong")   return "Needs Fix";
   return "Unreviewed";
 }
 
@@ -1560,9 +1904,9 @@ function statusClass(decision) {
 function queueBadge(item) {
   let html = "";
   if (item.decision === "correct") {
-    html += '<span class="badge-soft badge-correct">Correct</span>';
+    html += '<span class="badge-soft badge-correct">Accepted</span>';
   } else if (item.decision === "wrong") {
-    html += '<span class="badge-soft badge-wrong">Wrong</span>';
+    html += '<span class="badge-soft badge-wrong">Fix</span>';
   } else {
     html += '<span class="badge-soft badge-unreviewed">Unreviewed</span>';
   }
@@ -1581,11 +1925,16 @@ function renderQueue() {
   if (!state.session) {
     queueList.innerHTML = "";
     queueMeta.textContent = "No folder loaded.";
+    if (queueProgressInline) queueProgressInline.textContent = "0/0 completed (0%)";
     return;
   }
 
   const filtered = filterImages(state.session.images, state.activeFilter);
   queueMeta.textContent = `${filtered.length} images in ${state.activeFilter} view`;
+  if (queueProgressInline) {
+    const summary = state.session.summary;
+    queueProgressInline.textContent = `${summary.reviewed_count}/${summary.total_count} completed (${summary.percent_reviewed}%)`;
+  }
 
   if (!filtered.length) {
     queueList.innerHTML = '<div class="text-muted">No images match this filter.</div>';
@@ -1616,6 +1965,7 @@ function renderQueue() {
 function loadPolygonsForCurrentImage() {
   const image = currentImage();
   state.activeMaskId = null;
+  state.hoverMaskId = null;
   state.activePredictionId = null;
   if (image && image.polygons && image.polygons.length) {
     state.finishedPolygons = image.polygons.map((poly) => ({
@@ -1645,12 +1995,13 @@ function renderViewer() {
   viewerTitle.textContent = hasImage ? image.filename : "No image in current filter";
   viewerSubtitle.textContent = state.session
     ? `${state.session.folder_path} | ${filtered.length} items in ${state.activeFilter} view`
-    : "Keyboard shortcuts: A/D navigate, C correct, W wrong, U reset, P draw polygon, Esc cancel.";
+    : "Keyboard shortcuts: A accept, F fix, D delete, arrows navigate, Z undo.";
 
   prevBtn.disabled = !hasImage || currentIndex <= 0;
   nextBtn.disabled = !hasImage || currentIndex === -1 || currentIndex >= filtered.length - 1;
   markCorrectBtn.disabled = !hasImage;
   markWrongBtn.disabled   = !hasImage;
+  if (decisionDeleteBtn) decisionDeleteBtn.disabled = !hasImage;
   clearBtn.disabled       = !hasImage;
 
   if (!hasImage) {
@@ -1674,7 +2025,7 @@ function renderViewer() {
   mainImage.alt = image.relative_path;
 
   const isWrong = image.decision === "wrong";
-  showAnnotationToolbar(isWrong);
+  showAnnotationToolbar(isWrong && state.reviewMode !== "quick_review");
 
   // Only update src if changed (avoids flicker)
   if (mainImage.src !== image.image_url &&
@@ -1798,6 +2149,10 @@ function setWfStep(id, done) { setDone(id, done); }
 function setStepBadge(id, done) { setDone(id, done); }
 
 function render() {
+  applyTheme();
+  applyReviewMode();
+  applyQueueCollapse();
+  updateTopBarControls();
   updateFilterButtons();
   syncCurrentImage();
   syncImageCorrectionState();
@@ -1891,6 +2246,106 @@ async function updateDecision(decision) {
   render();
   persistUiState();
   return true;
+}
+
+function nextUnreviewedPath() {
+  if (!state.session) return null;
+  const filtered = filterImages(state.session.images, state.activeFilter);
+  if (!filtered.length) return null;
+  const currentIndex = Math.max(
+    filtered.findIndex((item) => item.relative_path === state.currentRelativePath), 0,
+  );
+  for (let i = currentIndex + 1; i < filtered.length; i++) {
+    if (!filtered[i].reviewed) return filtered[i].relative_path;
+  }
+  for (let i = 0; i <= currentIndex; i++) {
+    if (!filtered[i].reviewed) return filtered[i].relative_path;
+  }
+  return null;
+}
+
+function smartAdvanceAfterAccept() {
+  if (!state.autoAdvance || !state.session) return;
+  const nextPath = nextUnreviewedPath();
+  if (!nextPath) return;
+  state.currentRelativePath = nextPath;
+  render();
+  persistUiState();
+}
+
+function nextPredictionAfterDelete(deletedPredictionId) {
+  const image = currentImage();
+  if (!image || state.correctionMode === "redraw_all") return null;
+  const boxes = image.prediction_boxes || [];
+  const startIndex = boxes.findIndex((box) => String(box.object_id) === String(deletedPredictionId));
+  for (let i = startIndex + 1; i < boxes.length; i++) {
+    const objectKey = String(boxes[i].object_id);
+    if (predictionActionFor(objectKey) !== "delete") return objectKey;
+  }
+  return null;
+}
+
+function smartAdvanceAfterDelete(deletedPredictionId) {
+  if (!state.autoAdvance) return;
+  const nextObjectId = nextPredictionAfterDelete(deletedPredictionId);
+  if (nextObjectId) {
+    state.activePredictionId = nextObjectId;
+    renderMaskSidebar();
+    return;
+  }
+  const nextPath = nextUnreviewedPath();
+  if (!nextPath) return;
+  state.currentRelativePath = nextPath;
+  render();
+  persistUiState();
+}
+
+function batchAcceptCandidates(threshold) {
+  if (!state.session) return [];
+  const filtered = filterImages(state.session.images, state.activeFilter);
+  return filtered.filter((image) => {
+    if (image.reviewed) return false;
+    const boxes = image.prediction_boxes || [];
+    if (!boxes.length) return false;
+    const maxConfidence = Math.max(...boxes.map((box) => Number(box.confidence || 0)));
+    return maxConfidence >= threshold;
+  });
+}
+
+function closeBatchAcceptModal() {
+  if (!batchAcceptModal) return;
+  batchAcceptModal.classList.add("hidden");
+  if (batchAcceptError) batchAcceptError.style.display = "none";
+}
+
+function refreshBatchAcceptPreview() {
+  if (!batchAcceptPreview) return;
+  const threshold = Math.max(0, Math.min(1, Number(batchAcceptThreshold?.value || 0.85)));
+  const candidates = batchAcceptCandidates(threshold);
+  batchAcceptPreview.textContent = `${candidates.length} images match in ${state.activeFilter} filter.`;
+}
+
+async function runBatchAccept() {
+  if (!state.session) return;
+  const threshold = Math.max(0, Math.min(1, Number(batchAcceptThreshold?.value || 0.85)));
+  const candidates = batchAcceptCandidates(threshold);
+  if (!candidates.length) {
+    showToast("No images matched this threshold.");
+    return;
+  }
+  const response = await api("/api/review/batch", {
+    method: "POST",
+    body: JSON.stringify({
+      folder_path: state.session.folder_path,
+      relative_paths: candidates.map((item) => item.relative_path),
+      decision: "correct",
+    }),
+  });
+  const payload = await response.json();
+  state.session = payload.session;
+  render();
+  persistUiState();
+  showToast(`Accepted ${candidates.length} images.`);
 }
 
 // ── Target folder ────────────────────────────────────────────────────────────
@@ -2149,7 +2604,11 @@ exportFilenamesBtn.addEventListener("click", async () => {
 markCorrectBtn.addEventListener("click", async () => {
   try {
     const changed = await updateDecision("correct");
-    if (changed) showToast("Marked correct.");
+    if (changed) {
+      state.reviewMode = "decision";
+      showToast("Accepted.");
+      smartAdvanceAfterAccept();
+    }
   }
   catch (err) { showToast(err.message); }
 });
@@ -2157,9 +2616,34 @@ markCorrectBtn.addEventListener("click", async () => {
 markWrongBtn.addEventListener("click", async () => {
   try {
     const changed = await updateDecision("wrong");
-    if (changed) showToast("Marked wrong — draw polygon corrections below.");
+    if (changed) {
+      state.reviewMode = "fix";
+      showToast("Fix mode enabled.");
+      render();
+    }
   }
   catch (err) { showToast(err.message); }
+});
+
+decisionDeleteBtn?.addEventListener("click", async () => {
+  try {
+    const image = currentImage();
+    if (!image) return;
+    if (image.decision !== "wrong") {
+      await updateDecision("wrong");
+      state.reviewMode = "fix";
+    }
+    const selectedId = state.activePredictionId || String(image.prediction_boxes?.[0]?.object_id || "");
+    if (!selectedId) throw new Error("Select an object in the right panel before delete.");
+    setPredictionAction(selectedId, "delete");
+    await saveAnnotations();
+    showToast("Marked object as delete.");
+    smartAdvanceAfterDelete(selectedId);
+  } catch (err) { showToast(err.message); }
+});
+
+undoActionBtn?.addEventListener("click", () => {
+  undoPolygonBtn.click();
 });
 
 clearBtn.addEventListener("click", async () => {
@@ -2185,13 +2669,92 @@ document.getElementById("filter-group").addEventListener("click", (event) => {
   persistUiState();
 });
 
+queueCollapseBtn?.addEventListener("click", () => {
+  state.queueCollapsed = !state.queueCollapsed;
+  render();
+});
+
+toggleQuickReviewBtn?.addEventListener("click", () => {
+  state.reviewMode = state.reviewMode === "quick_review" ? "decision" : "quick_review";
+  render();
+});
+
+toggleThemeBtn?.addEventListener("click", () => {
+  state.theme = state.theme === "dark" ? "light" : "dark";
+  render();
+});
+toggleThemeNavBtn?.addEventListener("click", () => {
+  state.theme = state.theme === "dark" ? "light" : "dark";
+  render();
+});
+
+toggleAutoAdvanceBtn?.addEventListener("click", () => {
+  state.autoAdvance = !state.autoAdvance;
+  render();
+});
+
+batchAcceptBtn?.addEventListener("click", () => {
+  if (!batchAcceptModal) return;
+  refreshBatchAcceptPreview();
+  batchAcceptModal.classList.remove("hidden");
+});
+
+batchAcceptClose?.addEventListener("click", () => closeBatchAcceptModal());
+batchAcceptCancel?.addEventListener("click", () => closeBatchAcceptModal());
+batchAcceptModal?.addEventListener("click", (event) => {
+  if (event.target === batchAcceptModal) closeBatchAcceptModal();
+});
+batchAcceptThreshold?.addEventListener("input", () => refreshBatchAcceptPreview());
+batchAcceptForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (batchAcceptError) batchAcceptError.style.display = "none";
+  try {
+    await runBatchAccept();
+    closeBatchAcceptModal();
+  } catch (err) {
+    if (batchAcceptError) {
+      batchAcceptError.textContent = err.message || "Batch accept failed.";
+      batchAcceptError.style.display = "block";
+    } else {
+      showToast(err.message);
+    }
+  }
+});
+
 // Annotation toolbar
 drawPolygonBtn.addEventListener("click", () => {
   if (state.sam2Mode || hasPendingSam2Draft()) {
     if (!ensureNoPendingSam2Draft("switch to manual polygon drawing")) return;
     exitSam2Mode();
   }
+  exitBrushTools();
   if (state.drawMode) { exitDrawMode(); } else { enterDrawMode(); }
+});
+
+brushToolBtn?.addEventListener("click", () => {
+  if (state.brushMode) {
+    exitBrushTools();
+    redrawCanvas();
+    updateAnnotationToolbar();
+    return;
+  }
+  enterBrushMode();
+});
+
+eraserToolBtn?.addEventListener("click", () => {
+  if (state.eraserMode) {
+    exitBrushTools();
+    redrawCanvas();
+    updateAnnotationToolbar();
+    return;
+  }
+  enterEraserMode();
+});
+
+brushSizeInput?.addEventListener("input", () => {
+  state.brushSize = Math.max(2, Math.min(120, Number(brushSizeInput.value || 20)));
+  updateAnnotationToolbar();
+  redrawCanvas();
 });
 
 if (sam2ToolBtn) {
@@ -2259,6 +2822,7 @@ clearPolygonsBtn.addEventListener("click", () => {
     return;
   }
   exitDrawMode();
+  exitBrushTools();
   state.finishedPolygons = [];
   Object.keys(state.predictionActions).forEach((key) => {
     if (state.predictionActions[key] === "replace") state.predictionActions[key] = "keep";
@@ -2347,21 +2911,49 @@ window.addEventListener("keydown", async (event) => {
       }
     }
     // Block nav/review shortcuts while actively drawing
-    if (state.drawMode) return;
+    if (state.drawMode || state.brushStrokeActive) return;
 
     if (event.key.toLowerCase() === "p") {
       const image = currentImage();
       if (image && image.decision === "wrong") {
         if (state.drawMode) { exitDrawMode(); } else { enterDrawMode(); }
       }
-    } else if (event.key.toLowerCase() === "a" || event.key === "ArrowLeft") {
+    } else if (event.key === "ArrowLeft") {
       navigate(-1);
-    } else if (event.key.toLowerCase() === "d" || event.key === "ArrowRight") {
+    } else if (event.key === "ArrowRight") {
       navigate(1);
+    } else if (event.key.toLowerCase() === "a") {
+      const changed = await updateDecision("correct");
+      if (changed) {
+        state.reviewMode = "decision";
+        showToast("Accepted.");
+        smartAdvanceAfterAccept();
+      }
+    } else if (event.key.toLowerCase() === "f") {
+      const changed = await updateDecision("wrong");
+      if (changed) {
+        state.reviewMode = "fix";
+        showToast("Fix mode enabled.");
+        render();
+      }
+    } else if (event.key.toLowerCase() === "d") {
+      decisionDeleteBtn?.click();
+    } else if (event.key.toLowerCase() === "z") {
+      undoPolygonBtn.click();
     } else if (event.key.toLowerCase() === "c") {
-      if (await updateDecision("correct")) showToast("Marked correct.");
+      const changed = await updateDecision("correct");
+      if (changed) {
+        state.reviewMode = "decision";
+        showToast("Accepted.");
+        smartAdvanceAfterAccept();
+      }
     } else if (event.key.toLowerCase() === "w") {
-      if (await updateDecision("wrong")) showToast("Marked wrong — draw polygon corrections below.");
+      const changed = await updateDecision("wrong");
+      if (changed) {
+        state.reviewMode = "fix";
+        showToast("Fix mode enabled.");
+        render();
+      }
     } else if (event.key.toLowerCase() === "u") {
       if (await updateDecision("unreviewed")) showToast("Cleared review state.");
     } else if (event.key === "Delete" || event.key === "Backspace") {
@@ -2730,3 +3322,7 @@ function formatEventTime(iso) {
     render();
   }
 })();
+
+
+
+

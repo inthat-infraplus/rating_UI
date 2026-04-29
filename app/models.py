@@ -22,10 +22,19 @@ class ReviewUpdateRequest(BaseModel):
     decision: Decision
 
 
+class ReviewBatchUpdateRequest(BaseModel):
+    folder_path: str = Field(..., min_length=1)
+    relative_paths: list[str] = Field(default_factory=list, min_length=1)
+    decision: Decision
+
+
 class UiStateUpdateRequest(BaseModel):
     folder_path: str = Field(..., min_length=1)
     current_relative_path: str | None = None
-    filter_mode: str = Field(default="all", pattern="^(all|reviewed|unreviewed|selected)$")
+    filter_mode: str = Field(
+        default="unreviewed",
+        pattern="^(all|reviewed|unreviewed|selected|wrong|completed)$",
+    )
 
 
 class SessionConfigUpdateRequest(BaseModel):
@@ -66,6 +75,8 @@ class ImageAnnotationUpdateRequest(BaseModel):
     polygons: list[PolygonAnnotation]
     image_natural_width: int
     image_natural_height: int
+    correction_mode: str = Field(default="patch", pattern="^(patch|redraw_all)$")
+    prediction_actions: dict[str, str] = Field(default_factory=dict)
 
 
 class ScaleProfileLinkRequest(BaseModel):

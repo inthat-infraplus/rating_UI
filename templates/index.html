@@ -22,6 +22,7 @@
       <div class="app-nav-user">
         <span class="nav-user-name">{{ current_user.display_name or current_user.username }}</span>
         <span class="nav-user-role role-{{ current_user.role.value | lower }}">{{ current_user.role.value }}</span>
+        <button class="btn btn-sm btn-outline-secondary ms-2" id="toggle-theme-nav-btn" type="button">Theme: Dark</button>
         <form method="post" action="/logout" class="d-inline-block ms-2">
           <button class="btn btn-sm btn-outline-secondary" type="submit">Sign out</button>
         </form>
@@ -312,15 +313,30 @@
     </div>
 
     <!-- ── Review layout ─────────────────────────────────────────────────────── -->
+        <section class="focus-status-bar" id="focus-status-bar">
+      <div class="focus-status-left">
+        <span class="focus-status-label">Decision-first review</span>
+        <span class="focus-status-progress" id="queue-progress-inline">0/0 completed (0%)</span>
+      </div>
+      <div class="focus-status-right">
+        <button class="btn btn-sm btn-outline-secondary" id="toggle-quick-review-btn" type="button">Quick Review: Off</button>
+        <button class="btn btn-sm btn-outline-secondary" id="toggle-theme-btn" type="button">Theme: Dark</button>
+        <button class="btn btn-sm btn-outline-secondary" id="toggle-auto-advance-btn" type="button">Auto-Advance: On</button>
+      </div>
+    </section>
     <section class="review-layout">
-      <aside class="sidebar-panel">
+      <aside class="sidebar-panel" id="queue-panel">
         <div class="sidebar-head">
-          <h2>Queue</h2>
+          <div class="queue-head-row">
+            <h2>Queue</h2>
+            <button class="btn btn-sm btn-outline-secondary" id="queue-collapse-btn" type="button">Collapse</button>
+          </div>
           <div class="filter-group" id="filter-group">
             <button class="chip active" data-filter="unreviewed" type="button">Unreviewed</button>
-            <button class="chip" data-filter="reviewed" type="button">Reviewed</button>
-            <button class="chip" data-filter="selected" type="button">Selected</button>
+            <button class="chip" data-filter="wrong" type="button">Wrong</button>
+            <button class="chip" data-filter="completed" type="button">Completed</button>
           </div>
+          <button class="btn btn-sm btn-outline-primary" id="batch-accept-btn" type="button">Batch Accept</button>
         </div>
         <div class="queue-meta" id="queue-meta">No folder loaded — complete Step 1 above.</div>
         <div class="queue-list" id="queue-list"></div>
@@ -407,6 +423,13 @@
               <option value="pavement">Pavement (CC)</option>
             </select>
             <button class="btn btn-sm btn-outline-primary" id="draw-polygon-btn" type="button">✏️ Draw Polygon</button>
+            <button class="btn btn-sm btn-outline-primary" id="brush-tool-btn" type="button">Brush</button>
+            <button class="btn btn-sm btn-outline-secondary" id="eraser-tool-btn" type="button">Eraser</button>
+            <label class="brush-size-wrap" for="brush-size-input">
+              <span class="brush-size-label">Brush</span>
+              <input class="brush-size-input" id="brush-size-input" type="range" min="4" max="80" step="1" value="20" />
+              <span class="brush-size-value" id="brush-size-value">20 px</span>
+            </label>
             <button class="btn btn-sm btn-outline-info" id="sam2-tool-btn" type="button"
                     title="AI-assist: add point prompts or draw a box to segment with SAM3" disabled>
               🪄 SAM3
@@ -438,19 +461,42 @@
           </div>
         </div>
 
-        <div class="decision-panel">
+        <div class="decision-panel decision-panel-sticky">
           <div class="decision-meta">
             <span class="status-pill status-unreviewed" id="current-status">Unreviewed</span>
             <span class="decision-timestamp" id="reviewed-at">Not yet reviewed</span>
           </div>
           <div class="decision-actions">
-            <button class="btn btn-success btn-lg" id="mark-correct-btn" type="button" disabled>✓ Correct</button>
-            <button class="btn btn-danger btn-lg" id="mark-wrong-btn" type="button" disabled>✗ Wrong</button>
-            <button class="btn btn-outline-secondary btn-lg" id="clear-btn" type="button" disabled>Reset</button>
+            <button class="btn btn-success btn-lg" id="mark-correct-btn" type="button" disabled>Accept (A)</button>
+            <button class="btn btn-warning btn-lg" id="mark-wrong-btn" type="button" disabled>Fix (F)</button>
+            <button class="btn btn-danger btn-lg" id="decision-delete-btn" type="button" disabled>Delete (D)</button>
+            <button class="btn btn-outline-secondary btn-lg" id="clear-btn" type="button" disabled>Reset (U)</button>
+            <button class="btn btn-outline-secondary btn-lg" id="undo-action-btn" type="button">Undo (Z)</button>
           </div>
+          <div class="decision-shortcuts">Navigate with &larr; / &rarr;</div>
         </div>
       </main>
     </section>
+  </div>
+
+  <div class="modal-backdrop hidden" id="batch-accept-modal">
+    <div class="modal-card" role="dialog" aria-labelledby="batch-accept-title">
+      <header class="modal-head">
+        <h2 id="batch-accept-title">Batch Accept</h2>
+        <button class="modal-close" id="batch-accept-close" type="button" aria-label="Close">x</button>
+      </header>
+      <form id="batch-accept-form" class="px-4 pb-3">
+        <p class="text-muted small mb-2">Apply Accept to the current queue filter using confidence threshold.</p>
+        <label class="form-label" for="batch-accept-threshold">Confidence threshold</label>
+        <input class="form-control" id="batch-accept-threshold" type="number" min="0" max="1" step="0.01" value="0.85" />
+        <div class="mt-2 text-muted small" id="batch-accept-preview">0 images match.</div>
+        <div class="modal-error" id="batch-accept-error" style="display:none"></div>
+        <footer class="modal-foot">
+          <button class="btn btn-outline-secondary" id="batch-accept-cancel" type="button">Cancel</button>
+          <button class="btn btn-primary" type="submit">Apply Accept</button>
+        </footer>
+      </form>
+    </div>
   </div>
 
   <div class="toast-wrap">
@@ -465,3 +511,6 @@
   <script src="{{ url_for('static', path='app.js') }}"></script>
 </body>
 </html>
+
+
+
