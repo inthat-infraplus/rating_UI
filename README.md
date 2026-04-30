@@ -45,7 +45,8 @@ python -m app.cli restore-db --snapshot .\db_snapshots\<snapshot-file>.db
 Then run the app and sign in at `/login`:
 
 ```powershell
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload
+user open at 'http://192.168.120.231:8005'
 ```
 
 Subsequent users can be created from the L1 admin page at `/admin/users` (the **⚙ Users** link in the top nav).
