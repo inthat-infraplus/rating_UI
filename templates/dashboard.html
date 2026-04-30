@@ -15,6 +15,9 @@
       <div class="app-nav-brand">
         <span class="brand-mark">●</span>
         <span class="brand-title">Rating UI</span>
+        {% if current_user.role.value == "L1" %}
+        <a href="/kpi" class="app-nav-link role-l1-only" title="KPI dashboard">KPI</a>
+        {% endif %}
       </div>
       <div class="app-nav-user" id="nav-user">
         <span class="nav-qc-badge" id="nav-qc-badge" style="display:none" title="Action needed"></span>

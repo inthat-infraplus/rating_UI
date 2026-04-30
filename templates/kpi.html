@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KPI Dashboard — Rating UI</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap.min.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+</head>
+<body class="dashboard-body kpi-body">
+
+  <nav class="app-nav">
+    <div class="app-nav-inner">
+      <div class="app-nav-brand">
+        <a href="/" class="back-to-dashboard" title="Back to tasks">←</a>
+        <span class="brand-mark">●</span>
+        <span class="brand-title">Rating UI</span>
+        <a href="/kpi" class="app-nav-link app-nav-link-active role-l1-only" title="KPI dashboard">KPI</a>
+      </div>
+      <div class="app-nav-user">
+        <a href="/admin/users" class="nav-admin-link role-l1-only" title="Manage users">⚙ Users</a>
+        <span class="nav-user-name">{{ current_user.display_name or current_user.username }}</span>
+        <span class="nav-user-role role-{{ current_user.role.value | lower }}">{{ current_user.role.value }}</span>
+        <form method="post" action="/logout" class="d-inline-block ms-2">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Sign out</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <main class="dashboard-shell container-fluid py-4">
+    <header class="dashboard-head">
+      <div>
+        <p class="eyebrow mb-2">Administration</p>
+        <h1 class="mb-1">KPI Dashboard</h1>
+        <p class="dashboard-subtitle mb-0" id="kpi-updated-at">Loading KPI summary…</p>
+      </div>
+    </header>
+
+    <section class="kpi-cards" id="kpi-cards">
+      <article class="kpi-card">
+        <p class="kpi-card-label">Images Done</p>
+        <p class="kpi-card-value" id="kpi-images-done">0</p>
+        <p class="kpi-card-meta">Reviewed images with timeline data</p>
+      </article>
+      <article class="kpi-card">
+        <p class="kpi-card-label">Approved Folders</p>
+        <p class="kpi-card-value" id="kpi-approved-folders">0</p>
+        <p class="kpi-card-meta">Unique folders in approved/exported tasks</p>
+      </article>
+      <article class="kpi-card">
+        <p class="kpi-card-label">Labelers</p>
+        <p class="kpi-card-value" id="kpi-labelers">0</p>
+        <p class="kpi-card-meta">L2 users tracked for workload</p>
+      </article>
+    </section>
+
+    <section class="kpi-panel">
+      <div class="kpi-panel-head">
+        <h2>Weekly Progress (Images Done)</h2>
+      </div>
+      <div class="kpi-weekly-bars" id="kpi-weekly-bars">
+        <p class="dashboard-subtitle mb-0">No reviewed images yet.</p>
+      </div>
+    </section>
+
+    <section class="kpi-panel">
+      <div class="kpi-panel-head">
+        <h2>Workload by Labeler</h2>
+      </div>
+      <div class="kpi-table-wrap">
+        <table class="kpi-table" id="kpi-workload-table">
+          <thead>
+            <tr>
+              <th>Labeler</th>
+              <th>Assigned Tasks</th>
+              <th>Active Tasks</th>
+              <th>Approved Tasks</th>
+              <th>Reviewed / Total Images</th>
+              <th>Completion</th>
+            </tr>
+          </thead>
+          <tbody id="kpi-workload-tbody">
+            <tr>
+              <td colspan="6">Loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script id="bootstrap-data" type="application/json">
+    {
+      "user": {
+        "id": {{ current_user.id }},
+        "username": "{{ current_user.username }}",
+        "display_name": "{{ current_user.display_name }}",
+        "role": "{{ current_user.role.value }}"
+      }
+    }
+  </script>
+  <script src="{{ url_for('static', path='kpi.js') }}"></script>
+</body>
+</html>

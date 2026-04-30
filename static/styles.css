@@ -1373,6 +1373,30 @@ kbd {
   color: #0c2c39;
 }
 
+.app-nav-link {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #2c4452;
+  text-decoration: none;
+  padding: 0.22rem 0.62rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.app-nav-link:hover {
+  background: #18313f;
+  border-color: #18313f;
+  color: #fff;
+}
+
+.app-nav-link-active {
+  background: #18313f;
+  border-color: #18313f;
+  color: #fff;
+}
+
 .brand-mark {
   color: var(--accent);
   font-size: 1.4rem;
@@ -1437,6 +1461,154 @@ kbd {
 .dashboard-head-actions {
   display: flex;
   gap: 0.6rem;
+}
+
+/* KPI dashboard */
+.kpi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.kpi-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 22px rgba(7, 59, 76, 0.06);
+  padding: 1rem 1.1rem;
+}
+
+.kpi-card-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.kpi-card-value {
+  margin: 0.35rem 0 0.15rem;
+  font-size: 2rem;
+  font-weight: 800;
+  color: #0c2c39;
+  line-height: 1.1;
+}
+
+.kpi-card-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.kpi-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 22px rgba(7, 59, 76, 0.06);
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.kpi-panel-head h2 {
+  margin: 0 0 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0c2c39;
+}
+
+.kpi-weekly-bars {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.kpi-week-row {
+  display: grid;
+  grid-template-columns: 110px minmax(120px, 1fr) 140px;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.kpi-week-label {
+  font-weight: 600;
+  color: #2c4452;
+  font-size: 0.86rem;
+}
+
+.kpi-week-bar-track {
+  height: 10px;
+  background: #e9eff4;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.kpi-week-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0ea5e9, #2563eb);
+  border-radius: 999px;
+}
+
+.kpi-week-count {
+  text-align: right;
+  color: #18313f;
+  font-weight: 700;
+  font-size: 0.84rem;
+}
+
+.kpi-week-count span {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.kpi-table-wrap {
+  overflow-x: auto;
+}
+
+.kpi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.kpi-table thead th {
+  text-align: left;
+  padding: 0.7rem 0.8rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.kpi-table tbody td {
+  padding: 0.72rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.kpi-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.kpi-user-name {
+  font-weight: 700;
+  color: #18313f;
+}
+
+.kpi-user-sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .kpi-week-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .kpi-week-count {
+    text-align: left;
+  }
 }
 
 /* Filter bar */
@@ -2339,6 +2511,19 @@ body.task-theme-dark .stat-label,
 body.task-theme-dark .stat-muted,
 body.task-theme-dark .nav-user-name {
   color: #cbd5e1;
+}
+
+body.task-theme-dark .app-nav-link {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #dbeafe;
+}
+
+body.task-theme-dark .app-nav-link:hover,
+body.task-theme-dark .app-nav-link-active {
+  background: #0ea5e9;
+  border-color: #0ea5e9;
+  color: #ffffff;
 }
 
 body.task-theme-dark .status-pill,

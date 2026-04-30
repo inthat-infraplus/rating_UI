@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -25,7 +27,7 @@ from .auth import (
     require_user,
 )
 from .db import db_session, init_db
-from .models_db import User, UserRole
+from .models_db import Task, TaskStatus, User, UserRole
 from .schemas_task import (
     AssignRequest,
     CommentRequest,
@@ -107,6 +109,168 @@ def normalize_upload_relative_path(raw_name: str) -> str:
 def safe_folder_name(name: str) -> str:
     cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in name.strip())
     return cleaned.strip("-_") or "browser-import"
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _week_start_iso(dt: datetime) -> str:
+    week_start = dt.date() - timedelta(days=dt.weekday())
+    return week_start.isoformat()
+
+
+def _build_kpi_summary() -> dict[str, Any]:
+    with db_session() as db:
+        tasks = list(db.scalars(select(Task).where(Task.deleted_at.is_(None))).all())
+        l2_users = list(
+            db.scalars(
+                select(User).where(User.role == UserRole.L2).order_by(User.username),
+            ).all(),
+        )
+
+    unique_folders = sorted({str(task.folder_path).strip() for task in tasks if task.folder_path})
+    approved_folders = {
+        str(task.folder_path).strip()
+        for task in tasks
+        if task.folder_path and task.status in {TaskStatus.APPROVED, TaskStatus.EXPORTED}
+    }
+
+    reviewed_datetimes: list[datetime] = []
+    for folder_path in unique_folders:
+        try:
+            store = ReviewStore.open(folder_path)
+        except (FileNotFoundError, NotADirectoryError, ValueError, OSError):
+            continue
+        raw_images = store.state.get("images", {})
+        if not isinstance(raw_images, dict):
+            continue
+        for image_state in raw_images.values():
+            if not isinstance(image_state, dict):
+                continue
+            decision = str(image_state.get("decision", "")).strip().lower()
+            if decision not in {Decision.CORRECT.value, Decision.WRONG.value}:
+                continue
+            reviewed_at = _parse_iso_datetime(image_state.get("reviewed_at"))
+            if reviewed_at is not None:
+                reviewed_datetimes.append(reviewed_at)
+
+    counts_by_week: dict[str, int] = defaultdict(int)
+    for reviewed_at in reviewed_datetimes:
+        counts_by_week[_week_start_iso(reviewed_at)] += 1
+    weekly_rows: list[dict[str, Any]] = []
+    cumulative = 0
+    for week_start in sorted(counts_by_week):
+        week_count = counts_by_week[week_start]
+        cumulative += week_count
+        week_date = datetime.strptime(week_start, "%Y-%m-%d").date()
+        iso_week = week_date.isocalendar()
+        weekly_rows.append(
+            {
+                "week_start": week_start,
+                "week_label": f"{iso_week.year}-W{iso_week.week:02d}",
+                "images_done": week_count,
+                "cumulative": cumulative,
+            }
+        )
+
+    active_statuses = {
+        TaskStatus.ASSIGNED,
+        TaskStatus.IN_PROGRESS,
+        TaskStatus.SUBMITTED,
+        TaskStatus.IN_QC,
+        TaskStatus.RETURNED,
+    }
+    done_statuses = {TaskStatus.APPROVED, TaskStatus.EXPORTED}
+
+    workload_by_user: dict[int, dict[str, Any]] = {}
+    for user in l2_users:
+        workload_by_user[user.id] = {
+            "user_id": user.id,
+            "username": user.username,
+            "display_name": user.display_name,
+            "is_active": user.is_active,
+            "assigned_task_count": 0,
+            "active_task_count": 0,
+            "approved_task_count": 0,
+            "total_images": 0,
+            "reviewed_images": 0,
+            "correct_images": 0,
+            "wrong_images": 0,
+            "annotated_images": 0,
+            "completion_pct": 0.0,
+        }
+
+    for task in tasks:
+        if task.assigned_to is None:
+            continue
+        user_row = workload_by_user.get(task.assigned_to)
+        if user_row is None:
+            user_row = {
+                "user_id": task.assigned_to,
+                "username": f"user_{task.assigned_to}",
+                "display_name": f"User #{task.assigned_to}",
+                "is_active": False,
+                "assigned_task_count": 0,
+                "active_task_count": 0,
+                "approved_task_count": 0,
+                "total_images": 0,
+                "reviewed_images": 0,
+                "correct_images": 0,
+                "wrong_images": 0,
+                "annotated_images": 0,
+                "completion_pct": 0.0,
+            }
+            workload_by_user[task.assigned_to] = user_row
+
+        user_row["assigned_task_count"] += 1
+        if task.status in active_statuses:
+            user_row["active_task_count"] += 1
+        if task.status in done_statuses:
+            user_row["approved_task_count"] += 1
+        user_row["total_images"] += int(task.total_images or 0)
+        user_row["reviewed_images"] += int(task.reviewed_count or 0)
+        user_row["correct_images"] += int(task.correct_count or 0)
+        user_row["wrong_images"] += int(task.wrong_count or 0)
+        user_row["annotated_images"] += int(task.annotated_count or 0)
+
+    workload_rows = list(workload_by_user.values())
+    for row in workload_rows:
+        total_images = int(row["total_images"] or 0)
+        reviewed_images = int(row["reviewed_images"] or 0)
+        row["completion_pct"] = round((reviewed_images / total_images) * 100, 1) if total_images else 0.0
+
+    workload_rows.sort(
+        key=lambda item: (
+            -int(item.get("reviewed_images", 0)),
+            -int(item.get("assigned_task_count", 0)),
+            str(item.get("username", "")),
+        ),
+    )
+
+    return {
+        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "totals": {
+            "images_done": len(reviewed_datetimes),
+            "approved_folders": len(approved_folders),
+            "total_folders": len(unique_folders),
+            "l2_users": len(l2_users),
+            "tasks": len(tasks),
+        },
+        "timeline_weekly": weekly_rows,
+        "workload_by_labeler": workload_rows,
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -819,6 +983,26 @@ async def api_add_comment(
 
 
 # ─── User management (L1 only) ─────────────────────────────────────────────
+
+@app.get("/kpi", response_class=HTMLResponse)
+async def kpi_page(request: Request):
+    user = current_user(request)
+    if user is None:
+        return RedirectResponse(url="/login?next=/kpi", status_code=302)
+    if user.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden - L1 only.")
+    return templates.TemplateResponse(
+        request, "kpi.html", context={"current_user": user},
+    )
+
+
+@app.get("/api/kpi/summary")
+async def api_kpi_summary(request: Request) -> JSONResponse:
+    user = require_user(request)
+    if user.role != UserRole.L1:
+        raise HTTPException(status_code=403, detail="Forbidden - L1 only.")
+    return JSONResponse(content=_build_kpi_summary())
+
 
 @app.get("/api/users")
 async def api_list_users(request: Request) -> JSONResponse:
