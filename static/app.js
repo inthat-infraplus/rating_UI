@@ -119,6 +119,7 @@ const batchAcceptError       = document.getElementById("batch-accept-error");
 // annotation toolbar
 const annotationToolbar      = document.getElementById("annotation-toolbar");
 const annotationToolRail     = document.getElementById("annotation-tool-rail");
+const dragToolBtn            = document.getElementById("drag-tool-btn");
 const classSelect            = document.getElementById("class-select");
 const drawPolygonBtn         = document.getElementById("draw-polygon-btn");
 const brushToolBtn           = document.getElementById("brush-tool-btn");
@@ -1123,6 +1124,7 @@ function enterDrawMode() {
   annotationCanvas.style.pointerEvents = "auto";
   drawPolygonBtn.classList.add("active");
   annotHint.style.display = "";
+  updateAnnotationToolbar();
   redrawCanvas();
 }
 
@@ -1138,7 +1140,26 @@ function exitDrawMode() {
   }
   drawPolygonBtn.classList.remove("active");
   annotHint.style.display = "none";
+  updateAnnotationToolbar();
   redrawCanvas();
+}
+
+function enterDragMode({ discardSamDraft = false } = {}) {
+  if (state.drawMode) exitDrawMode();
+  exitBrushTools();
+
+  if (state.sam2Mode || hasPendingSam2Draft()) {
+    if (!discardSamDraft && !ensureNoPendingSam2Draft("switch to drag tool")) return false;
+    resetSam2Draft();
+    exitSam2Mode();
+  }
+
+  state.hoverMaskId = null;
+  annotationCanvas.classList.remove("draw-mode");
+  annotationCanvas.style.pointerEvents = currentImage()?.decision === "wrong" ? "auto" : "none";
+  updateAnnotationToolbar();
+  redrawCanvas();
+  return true;
 }
 
 function enterBrushMode() {
@@ -1742,6 +1763,7 @@ function confirmSam2Mask() {
   }
 
   resetSam2Draft();
+  enterDragMode({ discardSamDraft: true });
   updateAnnotationToolbar();
   redrawCanvas();
   queueAnnotationSave();
@@ -1781,6 +1803,7 @@ function closeCurrentPolygon() {
   state.finishedPolygons.push(newPoly);
   state.currentPolygon = [];
   state.mousePt = null;
+  enterDragMode({ discardSamDraft: true });
   updateAnnotationToolbar();
   redrawCanvas();
   queueAnnotationSave();
@@ -2027,6 +2050,8 @@ function updateAnnotationToolbar() {
   if (brushSizeValue) brushSizeValue.textContent = `${state.brushSize} px`;
   brushToolBtn?.classList.toggle("active", state.brushMode);
   eraserToolBtn?.classList.toggle("active", state.eraserMode);
+  const dragActive = !state.drawMode && !state.brushMode && !state.eraserMode && !state.sam2Mode && !hasPendingSam2Draft();
+  dragToolBtn?.classList.toggle("active", dragActive);
   if (brushConfirmBtn) brushConfirmBtn.disabled = state.brushDraftPoints.length < 3;
   if (brushClearBtn) brushClearBtn.disabled = state.brushDraftPoints.length === 0;
 
@@ -3083,6 +3108,10 @@ drawPolygonBtn.addEventListener("click", () => {
   if (state.drawMode) { exitDrawMode(); } else { enterDrawMode(); }
 });
 
+dragToolBtn?.addEventListener("click", () => {
+  enterDragMode();
+});
+
 brushToolBtn?.addEventListener("click", () => {
   if (state.brushMode) {
     exitBrushTools();
@@ -3118,6 +3147,7 @@ brushConfirmBtn?.addEventListener("click", async () => {
     }
     queueAnnotationSave();
     await calculatePolygonArea(committed);
+    enterDragMode({ discardSamDraft: true });
     updateAnnotationToolbar();
     redrawCanvas();
     renderMaskSidebar();
@@ -3739,5 +3769,4 @@ function formatEventTime(iso) {
     render();
   }
 })();
-
 

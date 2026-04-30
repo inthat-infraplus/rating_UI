@@ -2572,6 +2572,22 @@ body.quick-review-mode .annotation-toolbar {
 /* UX refresh v2: clean tool rail + compact annotation dock */
 .viewer-workspace {
   position: relative;
+  --workspace-stage-height: clamp(62vh, 74vh, 84vh);
+}
+
+.viewer-workspace .image-stage {
+  min-height: var(--workspace-stage-height);
+  height: var(--workspace-stage-height);
+}
+
+.viewer-workspace .mask-sidebar {
+  min-height: var(--workspace-stage-height);
+  max-height: var(--workspace-stage-height);
+  height: var(--workspace-stage-height);
+}
+
+.viewer-workspace .mask-list {
+  flex: 1 1 auto;
 }
 
 .annotation-tool-rail {
@@ -2754,6 +2770,10 @@ body.task-theme-dark .annotation-toolbar {
   .annotation-tool-rail {
     right: 0.85rem;
     top: 0.85rem;
+  }
+
+  .viewer-workspace {
+    --workspace-stage-height: min(72vh, 620px);
   }
 
   .annotation-toolbar-main {
