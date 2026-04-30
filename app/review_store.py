@@ -944,7 +944,9 @@ class ReviewStore:
             }
             original_rows_for_file = rows_by_filename.get(fname, [])
             original_ids = [_safe_int(row.get(object_id_header, 0)) for row in original_rows_for_file]
-            next_object_id = max(original_ids, default=0) + 1
+            unique_original_ids = sorted({oid for oid in original_ids if oid > 0})
+            next_object_id = max(unique_original_ids, default=0) + 1
+            retained_object_ids: set[int] = set()
 
             replace_polygons_by_object: dict[str, dict[str, Any]] = {}
             add_polygons: list[dict[str, Any]] = []
@@ -973,9 +975,14 @@ class ReviewStore:
             replaced_count += 1
 
             if correction_mode == "redraw_all":
+                reusable_object_ids = list(unique_original_ids)
                 for poly in polygons:
-                    output_rows.append(export_row_for_polygon(fname, poly, nat_w, nat_h, next_object_id))
-                    next_object_id += 1
+                    if reusable_object_ids:
+                        object_id = reusable_object_ids.pop(0)
+                    else:
+                        object_id = next_object_id
+                        next_object_id += 1
+                    output_rows.append(export_row_for_polygon(fname, poly, nat_w, nat_h, object_id))
                 continue
 
             for orig_row in original_rows_for_file:
@@ -991,14 +998,21 @@ class ReviewStore:
                         out = dict(orig_row)
                         out["Polygon Points"] = out.get("Polygon Points", "")
                         output_rows.append(out)
+                    retained_object_ids.add(object_id)
                     continue
                 out = dict(orig_row)
                 out["Polygon Points"] = out.get("Polygon Points", "")
                 output_rows.append(out)
+                retained_object_ids.add(object_id)
 
+            reusable_object_ids = [oid for oid in unique_original_ids if oid not in retained_object_ids]
             for poly in add_polygons:
-                output_rows.append(export_row_for_polygon(fname, poly, nat_w, nat_h, next_object_id))
-                next_object_id += 1
+                if reusable_object_ids:
+                    object_id = reusable_object_ids.pop(0)
+                else:
+                    object_id = next_object_id
+                    next_object_id += 1
+                output_rows.append(export_row_for_polygon(fname, poly, nat_w, nat_h, object_id))
 
         if not output_rows:
             raise ValueError("No data to export.")
