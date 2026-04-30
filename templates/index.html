@@ -411,56 +411,80 @@
           <div class="mask-sidebar-meta" id="mask-sidebar-meta">No masks yet.</div>
           <div class="mask-list" id="mask-list"></div>
         </aside>
+        <div class="annotation-tool-rail" id="annotation-tool-rail" style="display:none">
+          <button class="btn btn-sm btn-outline-primary tool-rail-btn" id="draw-polygon-btn" type="button" title="Draw Polygon">
+            <span class="tool-rail-icon">&#9998;</span>
+            <span class="tool-rail-text">Polygon</span>
+          </button>
+          <button class="btn btn-sm btn-outline-primary tool-rail-btn" id="brush-tool-btn" type="button" title="Brush Tool">
+            <span class="tool-rail-icon">&#128396;</span>
+            <span class="tool-rail-text">Brush</span>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary tool-rail-btn" id="eraser-tool-btn" type="button" title="Eraser Tool">
+            <span class="tool-rail-icon">&#9003;</span>
+            <span class="tool-rail-text">Eraser</span>
+          </button>
+          <button class="btn btn-sm btn-outline-info tool-rail-btn" id="sam2-tool-btn" type="button"
+                  title="AI-assist: add point prompts or draw a box to segment with SAM3" disabled>
+            <span class="tool-rail-icon">AI</span>
+            <span class="tool-rail-text">SAM3</span>
+          </button>
+          <div class="tool-rail-divider"></div>
+          <button class="btn btn-sm btn-outline-secondary tool-rail-btn" id="undo-polygon-btn" type="button" title="Undo Polygon Step">
+            <span class="tool-rail-icon">&#8630;</span>
+            <span class="tool-rail-text">Undo</span>
+          </button>
+          <button class="btn btn-sm btn-outline-danger tool-rail-btn" id="clear-polygons-btn" type="button" title="Clear All Polygons">
+            <span class="tool-rail-icon">&#9711;</span>
+            <span class="tool-rail-text">Clear</span>
+          </button>
+          <button class="btn btn-sm btn-danger tool-rail-btn" id="delete-selected-mask-btn" type="button" title="Delete Selected Mask" disabled>
+            <span class="tool-rail-icon">&#128465;</span>
+            <span class="tool-rail-text">Delete</span>
+          </button>
+        </div>
         </div>
 
         <div class="annotation-toolbar" id="annotation-toolbar" style="display:none">
-          <div class="annot-left">
-            <span class="annot-label">Draw correction polygon:</span>
-            <select class="form-select form-select-sm annot-class-select" id="class-select">
-              <option value="alligator crack">Alligator Crack</option>
-              <option value="crack">Crack</option>
-              <option value="patching">Patching</option>
-              <option value="pothole">Pothole</option>
-              <option value="pavement">Pavement (CC)</option>
-            </select>
-            <button class="btn btn-sm btn-outline-primary" id="draw-polygon-btn" type="button">✏️ Draw Polygon</button>
-            <button class="btn btn-sm btn-outline-primary" id="brush-tool-btn" type="button">Brush</button>
-            <button class="btn btn-sm btn-outline-secondary" id="eraser-tool-btn" type="button">Eraser</button>
-            <label class="brush-size-wrap" for="brush-size-input">
-              <span class="brush-size-label">Brush</span>
-              <input class="brush-size-input" id="brush-size-input" type="range" min="4" max="80" step="1" value="20" />
-              <span class="brush-size-value" id="brush-size-value">20 px</span>
-            </label>
-            <button class="btn btn-sm btn-success" id="brush-confirm-btn" type="button">Confirm Brush Mask</button>
-            <button class="btn btn-sm btn-outline-secondary" id="brush-clear-btn" type="button">Clear Brush Draft</button>
-            <button class="btn btn-sm btn-outline-info" id="sam2-tool-btn" type="button"
-                    title="AI-assist: add point prompts or draw a box to segment with SAM3" disabled>
-              🪄 SAM3
-            </button>
-            <div class="sam2-controls" id="sam2-controls" style="display:none">
-              <span class="sam2-controls-label">Point Prompts</span>
-              <div class="btn-group btn-group-sm sam2-prompt-source" role="group" aria-label="SAM3 prompt source">
-                <button class="btn btn-outline-primary" id="sam2-point-mode-btn" type="button">Point</button>
-                <button class="btn btn-outline-primary" id="sam2-box-mode-btn" type="button">Box</button>
-              </div>
-              <div class="btn-group btn-group-sm sam2-prompt-toggle" role="group" aria-label="SAM3 prompt type">
-                <button class="btn btn-outline-success" id="sam2-positive-btn" type="button">＋ Include</button>
-                <button class="btn btn-outline-danger" id="sam2-negative-btn" type="button">－ Exclude</button>
-              </div>
-              <button class="btn btn-sm btn-outline-secondary" id="sam2-undo-btn" type="button">Undo Prompt</button>
-              <button class="btn btn-sm btn-outline-secondary" id="sam2-clear-btn" type="button">Clear Prompts</button>
-              <button class="btn btn-sm btn-success" id="sam2-confirm-btn" type="button" disabled>Confirm Mask</button>
+          <div class="annotation-toolbar-main">
+            <div class="annot-left">
+              <span class="annot-label">Class</span>
+              <select class="form-select form-select-sm annot-class-select" id="class-select">
+                <option value="alligator crack">Alligator Crack</option>
+                <option value="crack">Crack</option>
+                <option value="patching">Patching</option>
+                <option value="pothole">Pothole</option>
+                <option value="pavement">Pavement (CC)</option>
+              </select>
+              <label class="brush-size-wrap" for="brush-size-input">
+                <span class="brush-size-label">Brush</span>
+                <input class="brush-size-input" id="brush-size-input" type="range" min="4" max="80" step="1" value="20" />
+                <span class="brush-size-value" id="brush-size-value">20 px</span>
+              </label>
+              <button class="btn btn-sm btn-success" id="brush-confirm-btn" type="button">Confirm Brush Mask</button>
+              <button class="btn btn-sm btn-outline-secondary" id="brush-clear-btn" type="button">Clear Brush Draft</button>
             </div>
-            <button class="btn btn-sm btn-outline-secondary" id="undo-polygon-btn" type="button">Undo</button>
-            <button class="btn btn-sm btn-outline-danger" id="clear-polygons-btn" type="button">Clear All</button>
-            <button class="btn btn-sm btn-danger" id="delete-selected-mask-btn" type="button" disabled>Delete Selected</button>
+            <div class="annot-right">
+              <span class="annot-count" id="polygon-count">0 polygons</span>
+              <span class="annot-hint" id="annot-hint" style="display:none">Click to place points &nbsp;&middot;&nbsp; double-click or click first point to close</span>
+              <span class="annot-hint annot-hint-sam2" id="annot-hint-sam2" style="display:none">Add green/red points or draw a box prompt - SAM3 updates the preview live</span>
+              <span class="annot-hint annot-hint-sam2-live" id="annot-hint-sam2-live" style="display:none">Preview only - use Confirm Mask to commit this label</span>
+              <span class="annot-count sam2-prompt-count" id="sam2-prompt-count" style="display:none">0 prompts</span>
+            </div>
           </div>
-          <div class="annot-right">
-            <span class="annot-count" id="polygon-count">0 polygons</span>
-            <span class="annot-hint" id="annot-hint" style="display:none">Click to place points &nbsp;·&nbsp; double-click or click first point to close</span>
-            <span class="annot-hint annot-hint-sam2" id="annot-hint-sam2" style="display:none">Add green/red points or draw a box prompt — SAM3 updates the preview live</span>
-            <span class="annot-hint annot-hint-sam2-live" id="annot-hint-sam2-live" style="display:none">Preview only — use Confirm Mask to commit this label</span>
-            <span class="annot-count sam2-prompt-count" id="sam2-prompt-count" style="display:none">0 prompts</span>
+          <div class="sam2-controls" id="sam2-controls" style="display:none">
+            <span class="sam2-controls-label">Point Prompts</span>
+            <div class="btn-group btn-group-sm sam2-prompt-source" role="group" aria-label="SAM3 prompt source">
+              <button class="btn btn-outline-primary" id="sam2-point-mode-btn" type="button">Point</button>
+              <button class="btn btn-outline-primary" id="sam2-box-mode-btn" type="button">Box</button>
+            </div>
+            <div class="btn-group btn-group-sm sam2-prompt-toggle" role="group" aria-label="SAM3 prompt type">
+              <button class="btn btn-outline-success" id="sam2-positive-btn" type="button">Include</button>
+              <button class="btn btn-outline-danger" id="sam2-negative-btn" type="button">Exclude</button>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" id="sam2-undo-btn" type="button">Undo Prompt</button>
+            <button class="btn btn-sm btn-outline-secondary" id="sam2-clear-btn" type="button">Clear Prompts</button>
+            <button class="btn btn-sm btn-success" id="sam2-confirm-btn" type="button" disabled>Confirm Mask</button>
           </div>
         </div>
 

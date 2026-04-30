@@ -112,6 +112,7 @@ class Sam2SegmentRequest(BaseModel):
 
 class PredictionBox(BaseModel):
     object_id: int
+    road_type: str = ""
     class_label: str
     value: float | None = None
     unit: str = ""

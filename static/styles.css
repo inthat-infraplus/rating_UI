@@ -2569,3 +2569,201 @@ body.quick-review-mode .annotation-toolbar {
   border-color: rgba(14, 165, 233, 0.55);
 }
 
+/* UX refresh v2: clean tool rail + compact annotation dock */
+.viewer-workspace {
+  position: relative;
+}
+
+.annotation-tool-rail {
+  position: absolute;
+  top: 0.9rem;
+  right: calc(280px + 1.65rem);
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 94px;
+  padding: 0.55rem;
+  border-radius: 16px;
+  border: 1px solid rgba(24, 49, 63, 0.18);
+  background: rgba(248, 252, 254, 0.9);
+  box-shadow: 0 12px 26px rgba(12, 22, 38, 0.16);
+  backdrop-filter: blur(6px);
+}
+
+.tool-rail-divider {
+  height: 1px;
+  background: rgba(24, 49, 63, 0.15);
+  margin: 0.2rem 0;
+}
+
+.tool-rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  min-height: 48px;
+  border-radius: 12px;
+  padding: 0.28rem 0.3rem;
+  font-weight: 700;
+  border-width: 1px;
+}
+
+.tool-rail-btn .tool-rail-icon {
+  font-size: 0.88rem;
+  line-height: 1;
+}
+
+.tool-rail-btn .tool-rail-text {
+  font-size: 0.63rem;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tool-rail-btn.active {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.annotation-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.68rem 0.85rem;
+  border-radius: 16px;
+  background: #f5f9fc;
+  border: 1px solid rgba(24, 49, 63, 0.16);
+}
+
+.annotation-toolbar-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.annot-left {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.annot-label {
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: #445a67;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.annot-class-select {
+  width: 170px;
+}
+
+.brush-size-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.2rem 0.48rem;
+  border: 1px solid rgba(24, 49, 63, 0.15);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.brush-size-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #18313f;
+  letter-spacing: 0.03em;
+}
+
+.brush-size-input {
+  width: 6.1rem;
+}
+
+.brush-size-value {
+  min-width: 3.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #4b5f6c;
+}
+
+.annot-right {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+}
+
+.annot-count {
+  font-weight: 700;
+  font-size: 0.83rem;
+  color: #4c1d95;
+  white-space: nowrap;
+}
+
+.annot-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.viewer-workspace.quick-review .annotation-tool-rail,
+body.quick-review-mode .annotation-tool-rail {
+  display: none !important;
+}
+
+body.task-theme-dark .annotation-tool-rail {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.35);
+  box-shadow: 0 12px 26px rgba(2, 6, 23, 0.5);
+}
+
+body.task-theme-dark .tool-rail-divider {
+  background: rgba(148, 163, 184, 0.32);
+}
+
+body.task-theme-dark .tool-rail-btn {
+  color: #dbeafe;
+  border-color: rgba(148, 163, 184, 0.34);
+  background: rgba(15, 23, 42, 0.84);
+}
+
+body.task-theme-dark .tool-rail-btn:hover {
+  background: rgba(30, 41, 59, 0.92);
+}
+
+body.task-theme-dark .tool-rail-btn.active {
+  border-color: rgba(14, 165, 233, 0.72);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.22);
+}
+
+body.task-theme-dark .annotation-toolbar {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
+@media (max-width: 1100px) {
+  .annotation-tool-rail {
+    right: 0.85rem;
+    top: 0.85rem;
+  }
+
+  .annotation-toolbar-main {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .annot-left,
+  .annot-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

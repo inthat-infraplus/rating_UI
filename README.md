@@ -117,6 +117,8 @@ If the env var is missing, the app warns at startup and uses an insecure dev key
 - Full-screen-first task detail layout with larger image stage
 - Zoom/pan workflow: zoom controls, Ctrl/Cmd+wheel zoom, and pan while zoomed
 - Keyboard-first shortcuts for faster review
+- CSV input supports legacy and updated schema; updated header includes `Road Type`:
+  `Image Filename,Road Type,Object ID,Class,Value,Unit,X1 (px),Y1 (px),X2 (px),Y2 (px),Confidence`
 
 ## Supported image formats
 

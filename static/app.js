@@ -118,6 +118,7 @@ const batchAcceptPreview     = document.getElementById("batch-accept-preview");
 const batchAcceptError       = document.getElementById("batch-accept-error");
 // annotation toolbar
 const annotationToolbar      = document.getElementById("annotation-toolbar");
+const annotationToolRail     = document.getElementById("annotation-tool-rail");
 const classSelect            = document.getElementById("class-select");
 const drawPolygonBtn         = document.getElementById("draw-polygon-btn");
 const brushToolBtn           = document.getElementById("brush-tool-btn");
@@ -844,11 +845,13 @@ function renderMaskSidebar() {
         const action = predictionActionFor(box.object_id);
         const active = !locked && state.activePredictionId === objectKey;
         const linkedMask = linkedMaskForPrediction(box.object_id);
+        const roadType = String(box.road_type || "").trim();
+        const roadTypeText = roadType ? ` | ${escapeHtml(roadType)}` : "";
         return `
           <div class="prediction-item ${active ? "active" : ""} ${locked ? "locked" : ""}" data-prediction-id="${objectKey}">
             <div class="prediction-main">
               <div class="prediction-title">${escapeHtml(box.class_label)} ${box.object_id}</div>
-              <div class="prediction-subtitle">conf ${Number(box.confidence || 0).toFixed(2)} · ${action}${linkedMask ? " · mask linked" : ""}</div>
+              <div class="prediction-subtitle">conf ${Number(box.confidence || 0).toFixed(2)}${roadTypeText} | ${action}${linkedMask ? " | mask linked" : ""}</div>
             </div>
             <div class="prediction-actions">
               <button class="prediction-action-btn ${action === "keep" ? "active" : ""}" type="button" data-prediction-action="keep" data-prediction-id="${objectKey}" ${locked ? "disabled" : ""}>Keep</button>
@@ -2065,6 +2068,7 @@ function updateAnnotationToolbar() {
 
 function showAnnotationToolbar(show) {
   annotationToolbar.style.display = show ? "flex" : "none";
+  if (annotationToolRail) annotationToolRail.style.display = show ? "flex" : "none";
   annotationCanvas.style.pointerEvents = show ? "auto" : "none";
   if (!show) {
     exitDrawMode();
@@ -3735,7 +3739,5 @@ function formatEventTime(iso) {
     render();
   }
 })();
-
-
 
 

@@ -95,6 +95,8 @@
 
 - ถ้าต้อง export updated CSV ควรลิงก์ CSV ก่อน
 - สามารถเปิด/ปิด `Show model bounding boxes` ได้ระหว่างรีวิว
+- รองรับหัวคอลัมน์รูปแบบใหม่ที่มี `Road Type`:
+  `Image Filename,Road Type,Object ID,Class,Value,Unit,X1 (px),Y1 (px),X2 (px),Y2 (px),Confidence`
 
 ---
 

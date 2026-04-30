@@ -108,6 +108,47 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+def _normalize_csv_header(value: Any) -> str:
+    text = str(value or "").strip().lstrip("\ufeff").lower()
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def _resolve_csv_header_map(fieldnames: list[str] | None) -> dict[str, str | None]:
+    normalized_to_actual: dict[str, str] = {}
+    for field in fieldnames or []:
+        key = _normalize_csv_header(field)
+        if key and key not in normalized_to_actual:
+            normalized_to_actual[key] = field
+
+    def pick(*candidates: str) -> str | None:
+        for candidate in candidates:
+            actual = normalized_to_actual.get(_normalize_csv_header(candidate))
+            if actual:
+                return actual
+        return None
+
+    return {
+        "image_filename": pick("Image Filename", "ImageFilename", "Filename"),
+        "road_type": pick("Road Type", "RoadType", "road_type"),
+        "object_id": pick("Object ID", "ObjectID"),
+        "class_label": pick("Class", "Label"),
+        "value": pick("Value"),
+        "unit": pick("Unit"),
+        "x1": pick("X1 (px)", "X1", "X1_px"),
+        "y1": pick("Y1 (px)", "Y1", "Y1_px"),
+        "x2": pick("X2 (px)", "X2", "X2_px"),
+        "y2": pick("Y2 (px)", "Y2", "Y2_px"),
+        "confidence": pick("Confidence", "Score"),
+    }
+
+
+def _row_value(row: dict[str, Any], header_map: dict[str, str | None], key: str) -> Any:
+    actual = header_map.get(key)
+    if not actual:
+        return ""
+    return row.get(actual, "")
+
+
 def _normalize_correction_mode(value: Any) -> str:
     return "redraw_all" if str(value or "").strip().lower() == "redraw_all" else "patch"
 
@@ -683,24 +724,28 @@ class ReviewStore:
             raise ValueError(f"Path is not a file: {csv_file}")
 
         rows_by_filename: dict[str, list[dict[str, Any]]] = {}
-        with open(csv_file, newline="", encoding="utf-8") as f:
+        with open(csv_file, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
+            header_map = _resolve_csv_header_map(list(reader.fieldnames or []))
+            if not header_map.get("image_filename"):
+                raise ValueError("CSV is missing required column: Image Filename")
             for row in reader:
-                filename = (row.get("Image Filename") or "").strip()
+                filename = str(_row_value(row, header_map, "image_filename") or "").strip()
                 if not filename:
                     continue
                 if filename not in rows_by_filename:
                     rows_by_filename[filename] = []
                 rows_by_filename[filename].append({
-                    "object_id": _safe_int(row.get("Object ID", 0)),
-                    "class_label": (row.get("Class") or "").strip(),
-                    "value": _safe_float(row.get("Value", 0)),
-                    "unit": (row.get("Unit") or "").strip(),
-                    "x1": _safe_int(row.get("X1 (px)", 0)),
-                    "y1": _safe_int(row.get("Y1 (px)", 0)),
-                    "x2": _safe_int(row.get("X2 (px)", 0)),
-                    "y2": _safe_int(row.get("Y2 (px)", 0)),
-                    "confidence": _safe_float(row.get("Confidence", 0)),
+                    "object_id": _safe_int(_row_value(row, header_map, "object_id")),
+                    "road_type": str(_row_value(row, header_map, "road_type") or "").strip(),
+                    "class_label": str(_row_value(row, header_map, "class_label") or "").strip(),
+                    "value": _safe_float(_row_value(row, header_map, "value")),
+                    "unit": str(_row_value(row, header_map, "unit") or "").strip(),
+                    "x1": _safe_int(_row_value(row, header_map, "x1")),
+                    "y1": _safe_int(_row_value(row, header_map, "y1")),
+                    "x2": _safe_int(_row_value(row, header_map, "x2")),
+                    "y2": _safe_int(_row_value(row, header_map, "y2")),
+                    "confidence": _safe_float(_row_value(row, header_map, "confidence")),
                 })
 
         self.state["csv_path"] = str(csv_file)
@@ -801,19 +846,40 @@ class ReviewStore:
             raise FileNotFoundError(f"Linked CSV not found: {csv_file}")
 
         # Read original CSV
-        with open(csv_file, newline="", encoding="utf-8") as f:
+        with open(csv_file, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             original_fieldnames = list(reader.fieldnames or [])
+            header_map = _resolve_csv_header_map(original_fieldnames)
             original_rows = list(reader)
+
+        image_filename_header = header_map.get("image_filename") or "Image Filename"
+        road_type_header = header_map.get("road_type")
+        object_id_header = header_map.get("object_id") or "Object ID"
+        class_label_header = header_map.get("class_label") or "Class"
+        value_header = header_map.get("value") or "Value"
+        unit_header = header_map.get("unit") or "Unit"
+        x1_header = header_map.get("x1") or "X1 (px)"
+        y1_header = header_map.get("y1") or "Y1 (px)"
+        x2_header = header_map.get("x2") or "X2 (px)"
+        y2_header = header_map.get("y2") or "Y2 (px)"
+        confidence_header = header_map.get("confidence") or "Confidence"
+
+        if not original_fieldnames:
+            raise ValueError("Linked CSV has no header row.")
+        if not header_map.get("image_filename"):
+            raise ValueError("Linked CSV is missing required column: Image Filename")
 
         # Group original rows by filename, preserving file order
         rows_by_filename: dict[str, list[dict[str, Any]]] = defaultdict(list)
         filename_order: list[str] = []
+        road_type_by_filename: dict[str, str] = {}
         for row in original_rows:
-            fname = (row.get("Image Filename") or "").strip()
+            fname = str(row.get(image_filename_header, "") or "").strip()
             if fname not in rows_by_filename:
                 filename_order.append(fname)
             rows_by_filename[fname].append(row)
+            if road_type_header and fname and fname not in road_type_by_filename:
+                road_type_by_filename[fname] = str(row.get(road_type_header, "") or "").strip()
 
         # Build filename -> image state mapping
         filename_to_state: dict[str, dict[str, Any]] = {}
@@ -846,21 +912,24 @@ class ReviewStore:
             x1, y1, x2, y2 = polygon_bbox(points, nat_w, nat_h)
             unit = stored_unit or ("m" if class_label.lower() == "crack" else "m^2")
             export_value = "" if stored_value is None else stored_value
-            return {
-                "Image Filename": fname,
-                "Object ID": object_id,
-                "Class": class_label,
-                "Value": export_value,
-                "Unit": unit,
-                "X1 (px)": x1,
-                "Y1 (px)": y1,
-                "X2 (px)": x2,
-                "Y2 (px)": y2,
-                "Confidence": "1.0",
+            out: dict[str, Any] = {
+                image_filename_header: fname,
+                object_id_header: object_id,
+                class_label_header: class_label,
+                value_header: export_value,
+                unit_header: unit,
+                x1_header: x1,
+                y1_header: y1,
+                x2_header: x2,
+                y2_header: y2,
+                confidence_header: "1.0",
                 "Polygon Points": json.dumps(
                     [{"x": round(p["x"], 6), "y": round(p["y"], 6)} for p in points]
                 ),
             }
+            if road_type_header:
+                out[road_type_header] = road_type_by_filename.get(fname, "")
+            return out
 
         for fname in filename_order:
             img_state = filename_to_state.get(fname, {})
@@ -874,7 +943,7 @@ class ReviewStore:
                 for key, value in (img_state.get("prediction_actions") or {}).items()
             }
             original_rows_for_file = rows_by_filename.get(fname, [])
-            original_ids = [_safe_int(row.get("Object ID", 0)) for row in original_rows_for_file]
+            original_ids = [_safe_int(row.get(object_id_header, 0)) for row in original_rows_for_file]
             next_object_id = max(original_ids, default=0) + 1
 
             replace_polygons_by_object: dict[str, dict[str, Any]] = {}
@@ -910,7 +979,7 @@ class ReviewStore:
                 continue
 
             for orig_row in original_rows_for_file:
-                object_id = _safe_int(orig_row.get("Object ID", 0))
+                object_id = _safe_int(orig_row.get(object_id_header, 0))
                 action = prediction_actions.get(str(object_id), "keep")
                 if action == "delete":
                     continue
@@ -935,7 +1004,7 @@ class ReviewStore:
             raise ValueError("No data to export.")
 
         # Fieldnames: all original columns + Polygon Points
-        fieldnames = original_fieldnames + ["Polygon Points"]
+        fieldnames = list(dict.fromkeys(original_fieldnames + ["Polygon Points"]))
 
         tmp_file = tempfile.NamedTemporaryFile(
             prefix="updated_", suffix=".csv", delete=False,
