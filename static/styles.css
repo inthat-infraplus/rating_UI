@@ -1673,6 +1673,15 @@ kbd {
   background: #eef3f7;
 }
 
+.card-menu-popup button:disabled {
+  color: #9aa7b3;
+  cursor: not-allowed;
+}
+
+.card-menu-popup button:disabled:hover {
+  background: transparent;
+}
+
 .card-menu-popup .menu-danger {
   color: var(--danger);
 }

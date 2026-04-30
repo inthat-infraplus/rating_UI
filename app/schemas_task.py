@@ -59,13 +59,14 @@ class TaskCreate(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    """Partial update — only L1, only when status allows edits (draft / returned)."""
+    """Partial update — only L1, only when status allows edits (draft / assigned / returned)."""
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     folder_path: str | None = None
     csv_path: str | None = None
     scale_profile_path: str | None = None
     target_folder_path: str | None = None
+    assigned_to: int | None = None
     due_date: date | None = None
 
 

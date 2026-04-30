@@ -162,7 +162,21 @@ def update_task(db: Session, actor: User, task_id: int, payload) -> Task:
         )
 
     fields = payload.model_dump(exclude_unset=True)
+    if "assigned_to" in fields:
+        assigned_to = fields.pop("assigned_to")
+        if assigned_to is not None:
+            assignee = db.get(User, assigned_to)
+            if assignee is None or assignee.role != UserRole.L2 or not assignee.is_active:
+                raise TaskServiceError("Assignee must be an active L2 user.")
+        task.assigned_to = assigned_to
+        if task.assigned_to is None and task.status == TaskStatus.ASSIGNED:
+            task.status = TaskStatus.DRAFT
+        elif task.assigned_to is not None and task.status == TaskStatus.DRAFT:
+            task.status = TaskStatus.ASSIGNED
+
     for key, value in fields.items():
+        if key == "description" and value is None:
+            value = ""
         setattr(task, key, value)
     return task
 

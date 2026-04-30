@@ -39,6 +39,8 @@ const FILTERS = IS_L1 ? FILTERS_L1 : FILTERS_L2;
 let allTasks = [];
 let allUsers = [];          // L1 only — for assignee dropdown
 let activeFilter = FILTERS[0].id;
+let taskModalMode = "create";
+let editingTaskId = null;
 
 // --- DOM helpers ---
 const $ = (sel) => document.querySelector(sel);
@@ -251,17 +253,26 @@ function navigateToTask(taskId) {
 function openCardMenu(task, anchor) {
   // Close any existing menus
   $$(".card-menu-popup").forEach((m) => m.remove());
+  const canEdit = ["draft", "assigned", "returned"].includes(task.status);
 
   const menu = document.createElement("div");
   menu.className = "card-menu-popup";
   menu.innerHTML = `
     <button type="button" data-action="open">Open</button>
+    <button type="button" data-action="edit" ${canEdit ? "" : "disabled"} title="${canEdit ? "Edit this task" : "Task can only be edited in draft/assigned/returned"}">Edit</button>
     <button type="button" data-action="delete" class="menu-danger">Delete</button>
   `;
   menu.addEventListener("click", async (e) => {
     e.stopPropagation();
     const action = e.target.dataset.action;
     if (action === "open") navigateToTask(task.id);
+    if (action === "edit") {
+      if (!canEdit) {
+        showToast("Task can only be edited in draft, assigned, or returned status.", "error");
+      } else {
+        openEditTaskModal(task);
+      }
+    }
     if (action === "delete") {
       if (!confirm(`Delete task "${task.title}"? This cannot be undone from the UI.`)) return;
       try {
@@ -293,11 +304,7 @@ function openCardMenu(task, anchor) {
 
 // --- new task modal ---
 
-function openNewTaskModal() {
-  $("#new-task-modal").classList.remove("hidden");
-  $("#new-task-error").style.display = "none";
-  $("#new-task-form").reset();
-  // Populate assignee dropdown
+function populateAssigneeDropdown(selectedId = null) {
   const sel = $("#nt-assignee");
   sel.innerHTML = `<option value="">(unassigned — keep as draft)</option>`;
   allUsers
@@ -308,39 +315,111 @@ function openNewTaskModal() {
       opt.textContent = `${u.display_name || u.username} (@${u.username})`;
       sel.appendChild(opt);
     });
+  if (selectedId !== null && selectedId !== undefined) {
+    sel.value = String(selectedId);
+  }
+}
+
+function openTaskModal(mode, task = null) {
+  taskModalMode = mode;
+  editingTaskId = mode === "edit" && task ? task.id : null;
+
+  $("#new-task-modal").classList.remove("hidden");
+  $("#new-task-error").style.display = "none";
+  $("#new-task-form").reset();
+
+  const titleEl = $("#new-task-title");
+  const submitEl = $("#new-task-submit");
+  if (mode === "edit") {
+    titleEl.textContent = "Edit task";
+    submitEl.textContent = "Save changes";
+    $("#nt-title").value = task?.title || "";
+    $("#nt-description").value = task?.description || "";
+    $("#nt-folder").value = task?.folder_path || "";
+    $("#nt-target").value = task?.target_folder_path || "";
+    $("#nt-csv").value = task?.csv_path || "";
+    $("#nt-scale").value = task?.scale_profile_path || "";
+    $("#nt-due").value = task?.due_date || "";
+    populateAssigneeDropdown(task?.assigned_to ?? null);
+  } else {
+    titleEl.textContent = "Create task";
+    submitEl.textContent = "Create task";
+    populateAssigneeDropdown(null);
+  }
+
   setTimeout(() => $("#nt-title").focus(), 50);
+}
+
+function openNewTaskModal() {
+  openTaskModal("create");
+}
+
+function openEditTaskModal(task) {
+  openTaskModal("edit", task);
 }
 
 function closeNewTaskModal() {
   $("#new-task-modal").classList.add("hidden");
+  taskModalMode = "create";
+  editingTaskId = null;
 }
 
-async function submitNewTask(ev) {
+function buildTaskPayload(data, { forEdit = false } = {}) {
+  const title = (data.title || "").trim();
+  if (!title) return { error: "Title is required." };
+
+  const payload = {
+    title,
+    description: (data.description || "").trim(),
+  };
+  const pathKeys = ["folder_path", "target_folder_path", "csv_path", "scale_profile_path"];
+  for (const key of pathKeys) {
+    const value = (data[key] || "").trim();
+    if (forEdit) payload[key] = value || null;
+    else if (value) payload[key] = value;
+  }
+
+  const dueDate = (data.due_date || "").trim();
+  if (forEdit) payload.due_date = dueDate || null;
+  else if (dueDate) payload.due_date = dueDate;
+
+  const assignedRaw = (data.assigned_to || "").trim();
+  if (forEdit) payload.assigned_to = assignedRaw ? parseInt(assignedRaw, 10) : null;
+  else if (assignedRaw) payload.assigned_to = parseInt(assignedRaw, 10);
+
+  return { payload };
+}
+
+async function submitTaskModal(ev) {
   ev.preventDefault();
   const form = ev.target;
   const data = Object.fromEntries(new FormData(form).entries());
-  // Trim + drop empties so server-side optional fields stay null
-  const payload = {};
-  for (const [k, v] of Object.entries(data)) {
-    const trimmed = (v || "").trim();
-    if (trimmed !== "") payload[k] = trimmed;
-  }
-  if (payload.assigned_to) payload.assigned_to = parseInt(payload.assigned_to, 10);
-  if (!payload.title) {
-    showError("Title is required.");
+  const { payload, error } = buildTaskPayload(data, { forEdit: taskModalMode === "edit" });
+  if (error) {
+    showError(error);
     return;
   }
 
   try {
-    const res = await fetchJson("/api/tasks", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const res = taskModalMode === "edit" && editingTaskId
+      ? await fetchJson(`/api/tasks/${editingTaskId}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        })
+      : await fetchJson("/api/tasks", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+    const action = taskModalMode === "edit" ? "Updated" : "Created";
     closeNewTaskModal();
-    showToast(`Created "${res.task.title}".`, "success");
+    showToast(`${action} "${res.task.title}".`, "success");
     await loadTasks();
   } catch (err) {
-    showError(err.message || "Could not create task.");
+    showError(
+      taskModalMode === "edit"
+        ? (err.message || "Could not update task.")
+        : (err.message || "Could not create task."),
+    );
   }
 }
 
@@ -392,7 +471,7 @@ function init() {
   $("#new-task-btn")?.addEventListener("click", openNewTaskModal);
   $("#new-task-close")?.addEventListener("click", closeNewTaskModal);
   $("#new-task-cancel")?.addEventListener("click", closeNewTaskModal);
-  $("#new-task-form")?.addEventListener("submit", submitNewTask);
+  $("#new-task-form")?.addEventListener("submit", submitTaskModal);
   // Click backdrop to close
   $("#new-task-modal")?.addEventListener("click", (e) => {
     if (e.target.id === "new-task-modal") closeNewTaskModal();
