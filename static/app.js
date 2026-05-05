@@ -9,6 +9,7 @@ const state = {
   queueCollapsed: true,
   correctionMode: "patch",
   predictionActions: {},
+  predictionClassOverrides: {},
   activePredictionId: null,
   toastTimer: null,
   uiSaveTimer: null,
@@ -318,15 +319,21 @@ function syncImageCorrectionState() {
   if (!image) {
     state.correctionMode = "patch";
     state.predictionActions = {};
+    state.predictionClassOverrides = {};
     state.activePredictionId = null;
     return;
   }
   state.correctionMode = image.correction_mode === "redraw_all" ? "redraw_all" : "patch";
   const actions = {};
+  const classOverrides = {};
   for (const box of image.prediction_boxes || []) {
     actions[String(box.object_id)] = box.action || "keep";
+    if (box.class_override) {
+      classOverrides[String(box.object_id)] = box.class_override;
+    }
   }
   state.predictionActions = actions;
+  state.predictionClassOverrides = classOverrides;
   if (state.activePredictionId && !(String(state.activePredictionId) in actions)) {
     state.activePredictionId = null;
   }
@@ -767,6 +774,11 @@ function predictionActionFor(objectId) {
   return state.predictionActions[String(objectId)] || "keep";
 }
 
+function predictionClassFor(box) {
+  const objectKey = String(box.object_id);
+  return state.predictionClassOverrides[objectKey] || box.class_label || "";
+}
+
 function linkedMaskForPrediction(objectId) {
   return state.finishedPolygons.find(
     (poly) => poly.merge_action === "replace" && String(poly.source_object_id) === String(objectId),
@@ -812,6 +824,36 @@ function setPredictionAction(objectId, action) {
   queueAnnotationSave();
 }
 
+function setPredictionClass(objectId, classLabel) {
+  const image = currentImage();
+  if (!image) return;
+  const objectKey = String(objectId);
+  const nextClass = String(classLabel || "").trim();
+  if (!nextClass) return;
+  const targetBox = (image.prediction_boxes || []).find(
+    (box) => String(box.object_id) === objectKey,
+  );
+  if (!targetBox) return;
+
+  const originalClass = String(targetBox.original_class_label || targetBox.class_label || "").trim();
+  if (!originalClass) return;
+
+  if (nextClass.toLowerCase() === originalClass.toLowerCase()) {
+    delete state.predictionClassOverrides[objectKey];
+    targetBox.class_override = null;
+    targetBox.class_label = originalClass;
+  } else {
+    state.predictionClassOverrides[objectKey] = nextClass;
+    targetBox.class_override = nextClass;
+    targetBox.class_label = nextClass;
+  }
+
+  renderBboxOverlay();
+  redrawCanvas();
+  renderMaskSidebar();
+  queueAnnotationSave();
+}
+
 function renderMaskSidebar() {
   if (!maskSidebar || !maskList || !maskSidebarMeta || !maskSidebarCount) return;
   const image = currentImage();
@@ -843,16 +885,25 @@ function renderMaskSidebar() {
         : "Choose Keep, Replace, or Delete for each original detection.";
       predictionList.innerHTML = predictionBoxes.map((box) => {
         const objectKey = String(box.object_id);
+        const classLabel = predictionClassFor(box);
         const action = predictionActionFor(box.object_id);
         const active = !locked && state.activePredictionId === objectKey;
         const linkedMask = linkedMaskForPrediction(box.object_id);
         const roadType = String(box.road_type || "").trim();
         const roadTypeText = roadType ? ` | ${escapeHtml(roadType)}` : "";
+        const originalClass = String(box.original_class_label || "").trim();
+        const changedClass = originalClass && classLabel.toLowerCase() !== originalClass.toLowerCase();
+        const classChangeHint = changedClass ? ` | relabel ${escapeHtml(originalClass)} → ${escapeHtml(classLabel)}` : "";
         return `
           <div class="prediction-item ${active ? "active" : ""} ${locked ? "locked" : ""}" data-prediction-id="${objectKey}">
             <div class="prediction-main">
-              <div class="prediction-title">${escapeHtml(box.class_label)} ${box.object_id}</div>
-              <div class="prediction-subtitle">conf ${Number(box.confidence || 0).toFixed(2)}${roadTypeText} | ${action}${linkedMask ? " | mask linked" : ""}</div>
+              <div class="prediction-title">${escapeHtml(classLabel)} ${box.object_id}</div>
+              <div class="prediction-subtitle">conf ${Number(box.confidence || 0).toFixed(2)}${roadTypeText} | ${action}${linkedMask ? " | mask linked" : ""}${classChangeHint}</div>
+            </div>
+            <div class="prediction-class-row">
+              <select class="form-select form-select-sm prediction-class-select" data-prediction-class-id="${objectKey}" title="Change detection class" ${locked ? "disabled" : ""}>
+                ${classOptionsMarkup(classLabel)}
+              </select>
             </div>
             <div class="prediction-actions">
               <button class="prediction-action-btn ${action === "keep" ? "active" : ""}" type="button" data-prediction-action="keep" data-prediction-id="${objectKey}" ${locked ? "disabled" : ""}>Keep</button>
@@ -875,6 +926,14 @@ function renderMaskSidebar() {
         btn.addEventListener("click", (event) => {
           event.stopPropagation();
           setPredictionAction(btn.dataset.predictionId, btn.dataset.predictionAction);
+        });
+      });
+      predictionList.querySelectorAll("[data-prediction-class-id]").forEach((selectEl) => {
+        selectEl.addEventListener("mousedown", (event) => event.stopPropagation());
+        selectEl.addEventListener("click", (event) => event.stopPropagation());
+        selectEl.addEventListener("change", (event) => {
+          event.stopPropagation();
+          setPredictionClass(selectEl.dataset.predictionClassId, selectEl.value);
         });
       });
     }
@@ -2141,6 +2200,7 @@ async function saveAnnotations() {
       image_natural_height: mainImage.naturalHeight || 1,
       correction_mode: state.correctionMode,
       prediction_actions: state.predictionActions,
+      prediction_class_overrides: state.predictionClassOverrides,
     }),
   });
   const payload = await response.json();
@@ -3769,4 +3829,3 @@ function formatEventTime(iso) {
     render();
   }
 })();
-

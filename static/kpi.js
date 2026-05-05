@@ -4,8 +4,14 @@ const updatedAtEl = document.getElementById("kpi-updated-at");
 const imagesDoneEl = document.getElementById("kpi-images-done");
 const approvedFoldersEl = document.getElementById("kpi-approved-folders");
 const labelersEl = document.getElementById("kpi-labelers");
+const rangeGroupEl = document.getElementById("kpi-range-group");
+const cumulativeWrapEl = document.getElementById("kpi-cumulative-wrap");
 const weeklyBarsEl = document.getElementById("kpi-weekly-bars");
 const workloadTbodyEl = document.getElementById("kpi-workload-tbody");
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+let timelineWeekly = [];
+let activeRange = "all";
 
 function fmtInt(value) {
   const num = Number(value || 0);
@@ -16,6 +22,10 @@ function fmtPercent(value) {
   const num = Number(value || 0);
   if (!Number.isFinite(num)) return "0.0%";
   return `${num.toFixed(1)}%`;
+}
+
+function createSvgEl(tag) {
+  return document.createElementNS(SVG_NS, tag);
 }
 
 async function fetchJson(url, options = {}) {
@@ -77,6 +87,149 @@ function renderWeeklyBars(rows) {
   }
 }
 
+function rangeToCount(range) {
+  if (range === "all") return null;
+  const match = /^(\d+)w$/.exec(String(range || "").trim().toLowerCase());
+  if (!match) return null;
+  return Math.max(1, Number(match[1]));
+}
+
+function filterTimeline(rows, range) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const count = rangeToCount(range);
+  if (!count || rows.length <= count) return rows.slice();
+  return rows.slice(rows.length - count);
+}
+
+function renderCumulativeLine(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    cumulativeWrapEl.innerHTML = '<p class="dashboard-subtitle mb-0">No reviewed images yet.</p>';
+    return;
+  }
+
+  cumulativeWrapEl.innerHTML = "";
+  const width = 920;
+  const height = 260;
+  const margin = { top: 18, right: 20, bottom: 40, left: 48 };
+  const plotW = width - margin.left - margin.right;
+  const plotH = height - margin.top - margin.bottom;
+  const maxY = Math.max(...rows.map((r) => Number(r.cumulative || 0)), 1);
+  const minY = 0;
+  const xStep = rows.length <= 1 ? plotW : plotW / (rows.length - 1);
+  const yScale = (value) => margin.top + plotH - ((value - minY) / (maxY - minY || 1)) * plotH;
+
+  const points = rows.map((row, idx) => {
+    const x = margin.left + xStep * idx;
+    const y = yScale(Number(row.cumulative || 0));
+    return { x, y, row };
+  });
+
+  const svg = createSvgEl("svg");
+  svg.setAttribute("class", "kpi-line-svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Cumulative reviewed images line chart");
+
+  for (let tick = 0; tick <= 4; tick += 1) {
+    const yVal = (maxY / 4) * tick;
+    const y = yScale(yVal);
+    const grid = createSvgEl("line");
+    grid.setAttribute("x1", String(margin.left));
+    grid.setAttribute("y1", String(y));
+    grid.setAttribute("x2", String(width - margin.right));
+    grid.setAttribute("y2", String(y));
+    grid.setAttribute("class", "kpi-line-grid");
+    svg.appendChild(grid);
+  }
+
+  const axisX = createSvgEl("line");
+  axisX.setAttribute("x1", String(margin.left));
+  axisX.setAttribute("y1", String(margin.top + plotH));
+  axisX.setAttribute("x2", String(width - margin.right));
+  axisX.setAttribute("y2", String(margin.top + plotH));
+  axisX.setAttribute("class", "kpi-line-axis");
+  svg.appendChild(axisX);
+
+  const axisY = createSvgEl("line");
+  axisY.setAttribute("x1", String(margin.left));
+  axisY.setAttribute("y1", String(margin.top));
+  axisY.setAttribute("x2", String(margin.left));
+  axisY.setAttribute("y2", String(margin.top + plotH));
+  axisY.setAttribute("class", "kpi-line-axis");
+  svg.appendChild(axisY);
+
+  const polyline = createSvgEl("polyline");
+  polyline.setAttribute(
+    "points",
+    points.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" "),
+  );
+  polyline.setAttribute("class", "kpi-line-path");
+  svg.appendChild(polyline);
+
+  for (const point of points) {
+    const dot = createSvgEl("circle");
+    dot.setAttribute("cx", String(point.x));
+    dot.setAttribute("cy", String(point.y));
+    dot.setAttribute("r", "3");
+    dot.setAttribute("class", "kpi-line-dot");
+    svg.appendChild(dot);
+  }
+
+  const firstPoint = points[0];
+  const midPoint = points[Math.floor(points.length / 2)];
+  const lastPoint = points[points.length - 1];
+  for (const tickPoint of [firstPoint, midPoint, lastPoint]) {
+    if (!tickPoint) continue;
+    const label = createSvgEl("text");
+    label.setAttribute("x", String(tickPoint.x));
+    label.setAttribute("y", String(height - 12));
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("class", "kpi-line-xlabel");
+    label.textContent = tickPoint.row.week_label || tickPoint.row.week_start || "";
+    svg.appendChild(label);
+  }
+
+  const maxLabel = createSvgEl("text");
+  maxLabel.setAttribute("x", String(margin.left + 6));
+  maxLabel.setAttribute("y", String(margin.top + 12));
+  maxLabel.setAttribute("class", "kpi-line-ylabel");
+  maxLabel.textContent = `${fmtInt(maxY)} total`;
+  svg.appendChild(maxLabel);
+
+  const lastValueLabel = createSvgEl("text");
+  lastValueLabel.setAttribute("x", String(lastPoint.x));
+  lastValueLabel.setAttribute("y", String(Math.max(margin.top + 12, lastPoint.y - 10)));
+  lastValueLabel.setAttribute("text-anchor", "end");
+  lastValueLabel.setAttribute("class", "kpi-line-lastvalue");
+  lastValueLabel.textContent = fmtInt(lastPoint.row.cumulative);
+  svg.appendChild(lastValueLabel);
+
+  cumulativeWrapEl.appendChild(svg);
+}
+
+function setActiveRange(nextRange) {
+  activeRange = nextRange || "all";
+  const buttons = rangeGroupEl ? rangeGroupEl.querySelectorAll(".kpi-range-chip") : [];
+  for (const btn of buttons) {
+    btn.classList.toggle("active", btn.dataset.range === activeRange);
+  }
+  const filtered = filterTimeline(timelineWeekly, activeRange);
+  renderCumulativeLine(filtered);
+  renderWeeklyBars(filtered);
+}
+
+function bindRangeControls() {
+  if (!rangeGroupEl) return;
+  rangeGroupEl.addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest(".kpi-range-chip")
+      : null;
+    if (!button) return;
+    const nextRange = button.getAttribute("data-range") || "all";
+    setActiveRange(nextRange);
+  });
+}
+
 function renderWorkload(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
     workloadTbodyEl.innerHTML = '<tr><td colspan="6">No labeler workload data yet.</td></tr>';
@@ -133,11 +286,14 @@ async function init() {
     } else {
       updatedAtEl.textContent = "Updated just now";
     }
-    renderWeeklyBars(data.timeline_weekly || []);
+    timelineWeekly = Array.isArray(data.timeline_weekly) ? data.timeline_weekly : [];
+    bindRangeControls();
+    setActiveRange(activeRange);
     renderWorkload(data.workload_by_labeler || []);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     updatedAtEl.textContent = `Failed to load KPI: ${message}`;
+    cumulativeWrapEl.innerHTML = "";
     weeklyBarsEl.innerHTML = "";
     const tr = document.createElement("tr");
     const td = document.createElement("td");

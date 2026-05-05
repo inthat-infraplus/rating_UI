@@ -160,6 +160,19 @@ def _normalize_prediction_action(value: Any) -> str:
     return "keep"
 
 
+def _normalize_prediction_class_overrides(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, class_label in value.items():
+        object_key = str(key or "").strip()
+        label = str(class_label or "").strip()
+        if not object_key or not label:
+            continue
+        normalized[object_key] = label
+    return normalized
+
+
 def _normalize_filter_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
     if mode == "selected":
@@ -581,6 +594,7 @@ class ReviewStore:
             if isinstance(image_state, dict):
                 image_state.setdefault("correction_mode", "patch")
                 image_state.setdefault("prediction_actions", {})
+                image_state.setdefault("prediction_class_overrides", {})
         store = cls(folder=folder, state_path=state_path, session_key=session_key, state=state)
         if store._apply_default_scale_profile():
             store.save()
@@ -617,16 +631,27 @@ class ReviewStore:
                 str(key): _normalize_prediction_action(value)
                 for key, value in (stored.get("prediction_actions") or {}).items()
             }
+            prediction_class_overrides = _normalize_prediction_class_overrides(
+                stored.get("prediction_class_overrides") or {},
+            )
 
             # Load prediction boxes from linked CSV
             raw_boxes = csv_rows.get(filename, [])
-            prediction_boxes = [
-                PredictionBox(
-                    **box,
-                    action=prediction_actions.get(str(box.get("object_id", "")), "keep"),
+            prediction_boxes = []
+            for box in raw_boxes:
+                base_box = dict(box)
+                original_class_label = str(base_box.pop("class_label", "") or "").strip()
+                object_key = str(base_box.get("object_id", ""))
+                class_override = prediction_class_overrides.get(object_key)
+                prediction_boxes.append(
+                    PredictionBox(
+                        **base_box,
+                        class_label=class_override or original_class_label,
+                        original_class_label=original_class_label,
+                        class_override=class_override,
+                        action=prediction_actions.get(object_key, "keep"),
+                    )
                 )
-                for box in raw_boxes
-            ]
 
             # Load polygon annotations (including real-world value/unit if calculated)
             raw_polygons = stored.get("polygons", [])
@@ -796,6 +821,7 @@ class ReviewStore:
         image_natural_height: int,
         correction_mode: str = "patch",
         prediction_actions: dict[str, str] | None = None,
+        prediction_class_overrides: dict[str, str] | None = None,
     ) -> SessionPayload:
         """Store polygon annotations for a single image."""
         validate_relative_path(self.folder, relative_path)
@@ -804,6 +830,9 @@ class ReviewStore:
             str(key): _normalize_prediction_action(value)
             for key, value in (prediction_actions or {}).items()
         }
+        normalized_class_overrides = _normalize_prediction_class_overrides(
+            prediction_class_overrides or {},
+        )
         normalized_polygons = []
         for poly in polygons:
             normalized_polygons.append({
@@ -816,6 +845,7 @@ class ReviewStore:
         image_state["image_natural_height"] = image_natural_height
         image_state["correction_mode"] = _normalize_correction_mode(correction_mode)
         image_state["prediction_actions"] = normalized_actions
+        image_state["prediction_class_overrides"] = normalized_class_overrides
         self.save()
         return self.load_session()
 
@@ -942,6 +972,9 @@ class ReviewStore:
                 str(key): _normalize_prediction_action(value)
                 for key, value in (img_state.get("prediction_actions") or {}).items()
             }
+            prediction_class_overrides = _normalize_prediction_class_overrides(
+                img_state.get("prediction_class_overrides") or {},
+            )
             original_rows_for_file = rows_by_filename.get(fname, [])
             original_ids = [_safe_int(row.get(object_id_header, 0)) for row in original_rows_for_file]
             unique_original_ids = sorted({oid for oid in original_ids if oid > 0})
@@ -962,6 +995,7 @@ class ReviewStore:
                 decision == "wrong"
                 or bool(polygons)
                 or any(action != "keep" for action in prediction_actions.values())
+                or bool(prediction_class_overrides)
                 or correction_mode == "redraw_all"
             )
 
@@ -988,6 +1022,7 @@ class ReviewStore:
             for orig_row in original_rows_for_file:
                 object_id = _safe_int(orig_row.get(object_id_header, 0))
                 action = prediction_actions.get(str(object_id), "keep")
+                class_override = prediction_class_overrides.get(str(object_id))
                 if action == "delete":
                     continue
                 if action == "replace":
@@ -996,11 +1031,15 @@ class ReviewStore:
                         output_rows.append(export_row_for_polygon(fname, replacement, nat_w, nat_h, object_id))
                     else:
                         out = dict(orig_row)
+                        if class_override:
+                            out[class_label_header] = class_override
                         out["Polygon Points"] = out.get("Polygon Points", "")
                         output_rows.append(out)
                     retained_object_ids.add(object_id)
                     continue
                 out = dict(orig_row)
+                if class_override:
+                    out[class_label_header] = class_override
                 out["Polygon Points"] = out.get("Polygon Points", "")
                 output_rows.append(out)
                 retained_object_ids.add(object_id)

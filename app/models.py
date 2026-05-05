@@ -77,6 +77,7 @@ class ImageAnnotationUpdateRequest(BaseModel):
     image_natural_height: int
     correction_mode: str = Field(default="patch", pattern="^(patch|redraw_all)$")
     prediction_actions: dict[str, str] = Field(default_factory=dict)
+    prediction_class_overrides: dict[str, str] = Field(default_factory=dict)
 
 
 class ScaleProfileLinkRequest(BaseModel):
@@ -114,6 +115,8 @@ class PredictionBox(BaseModel):
     object_id: int
     road_type: str = ""
     class_label: str
+    original_class_label: str | None = None
+    class_override: str | None = None
     value: float | None = None
     unit: str = ""
     x1: int = 0

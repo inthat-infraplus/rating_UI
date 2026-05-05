@@ -41,6 +41,7 @@ from .schemas_task import (
 from .models import (
     AreaCalculationRequest,
     CsvLinkRequest,
+    Decision,
     FolderRequest,
     ImageAnnotationUpdateRequest,
     ReviewBatchUpdateRequest,
@@ -595,6 +596,7 @@ async def update_annotations(request: ImageAnnotationUpdateRequest) -> JSONRespo
             request.image_natural_height,
             request.correction_mode,
             request.prediction_actions,
+            request.prediction_class_overrides,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -56,8 +56,17 @@
     </section>
 
     <section class="kpi-panel">
-      <div class="kpi-panel-head">
+      <div class="kpi-panel-head kpi-panel-head-controls">
         <h2>Weekly Progress (Images Done)</h2>
+        <div class="kpi-range-group" id="kpi-range-group" role="group" aria-label="Time range">
+          <button class="kpi-range-chip" type="button" data-range="4w">4w</button>
+          <button class="kpi-range-chip" type="button" data-range="8w">8w</button>
+          <button class="kpi-range-chip" type="button" data-range="12w">12w</button>
+          <button class="kpi-range-chip active" type="button" data-range="all">All</button>
+        </div>
+      </div>
+      <div class="kpi-cumulative-wrap" id="kpi-cumulative-wrap">
+        <p class="dashboard-subtitle mb-0">No reviewed images yet.</p>
       </div>
       <div class="kpi-weekly-bars" id="kpi-weekly-bars">
         <p class="dashboard-subtitle mb-0">No reviewed images yet.</p>
