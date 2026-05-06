@@ -287,24 +287,38 @@ def _calculate_tpl_polygon_metrics(
     class_label: str,
 ) -> tuple[float, str]:
     """
-    TPL bird-eye metric estimation (matches legacy TPL pipeline intent):
-    - crack: use bbox height ratio × TPL system height (m)
-    - area classes: use bbox width ratio × TPL width and bbox height ratio × TPL height
+    TPL bird-eye metric estimation using polygon geometry:
+    - crack: approximate centerline length by polygon perimeter / 2 (anisotropic m/px scaling)
+    - area classes: polygon area (shoelace) × (x_scale * y_scale)
     """
     if not points or nat_w <= 0 or nat_h <= 0:
         return 0.0, ""
 
-    xs = [p["x"] * nat_w for p in points]
-    ys = [p["y"] * nat_h for p in points]
-    x1, x2 = min(xs), max(xs)
-    y1, y2 = min(ys), max(ys)
+    pixel_pts = [(p["x"] * nat_w, p["y"] * nat_h) for p in points]
+    n = len(pixel_pts)
+    if n < 3:
+        return 0.0, ""
 
-    width_m = float((x2 - x1) * TPL_SYSTEM_WIDTH_METERS / nat_w)
-    length_m = float((y2 - y1) * TPL_SYSTEM_HEIGHT_METERS / nat_h)
+    x_scale = TPL_SYSTEM_WIDTH_METERS / nat_w
+    y_scale = TPL_SYSTEM_HEIGHT_METERS / nat_h
 
     if class_label.lower() == "crack":
-        return round(length_m, 4), "m"
-    return round(width_m * length_m, 4), "m^2"
+        perimeter_m = 0.0
+        for i in range(n):
+            x1, y1 = pixel_pts[i]
+            x2, y2 = pixel_pts[(i + 1) % n]
+            perimeter_m += math.sqrt(((x2 - x1) * x_scale) ** 2 + ((y2 - y1) * y_scale) ** 2)
+        return round(perimeter_m / 2.0, 4), "m"
+
+    # Shoelace area in pixel^2 -> convert to m^2 via anisotropic scaling.
+    area_px2 = 0.0
+    for i in range(n):
+        x1, y1 = pixel_pts[i]
+        x2, y2 = pixel_pts[(i + 1) % n]
+        area_px2 += (x1 * y2) - (x2 * y1)
+    area_px2 = abs(area_px2) / 2.0
+    area_m2 = area_px2 * x_scale * y_scale
+    return round(area_m2, 4), "m^2"
 
 
 class _ListWriter(list[str]):
