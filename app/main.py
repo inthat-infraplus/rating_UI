@@ -659,6 +659,7 @@ async def calculate_area(request: AreaCalculationRequest) -> JSONResponse:
             points_dicts,
             request.image_natural_width,
             request.image_natural_height,
+            request.metric_mode,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -1871,9 +1871,26 @@ function closeCurrentPolygon() {
 }
 
 async function calculatePolygonArea(poly) {
-  if (!state.session || !state.session.scale_profile_path) return;
+  if (!state.session) return;
   const image = currentImage();
   if (!image) return;
+
+  const roadTypeHints = (image.prediction_boxes || [])
+    .map((box) => String(box.road_type || "").trim().toLowerCase())
+    .filter(Boolean);
+  const hasTplRoadType = roadTypeHints.some((roadType) => {
+    const normalized = roadType.replace(/[_\-\s]+/g, "");
+    return normalized.includes("tpl") || normalized.includes("bev") || normalized.includes("bird");
+  });
+  const hasTplPathHint = [
+    String(state.session.folder_path || "").toLowerCase(),
+    String(state.session.csv_path || "").toLowerCase(),
+  ].some((pathHint) => pathHint.includes("tpl"));
+  const metricMode = hasTplRoadType || hasTplPathHint
+    ? "tpl"
+    : (state.session.scale_profile_path ? "scale_profile" : "auto");
+
+  if (metricMode === "auto") return;
 
   const normPoints = poly.points.map((pt) => canvasToNorm(pt.x, pt.y));
 
@@ -1886,6 +1903,7 @@ async function calculatePolygonArea(poly) {
         points: normPoints,
         image_natural_width: mainImage.naturalWidth || 1,
         image_natural_height: mainImage.naturalHeight || 1,
+        metric_mode: metricMode,
       }),
     });
     const result = await response.json();

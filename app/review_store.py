@@ -28,6 +28,8 @@ from .models import (
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tif", ".tiff"}
 DEFAULT_UI_STATE = UiState()
 DEFAULT_SCALE_PROFILE_PATH = Path(__file__).resolve().parent.parent / "scale_profile" / "scale_profile.csv"
+TPL_SYSTEM_WIDTH_METERS = 3.63
+TPL_SYSTEM_HEIGHT_METERS = 2.49
 
 
 def utc_now_iso() -> str:
@@ -276,6 +278,33 @@ def _calculate_polygon_metrics(
                 span_px = intersections[k + 1] - intersections[k]
                 area += span_px * x_s * y_s
         return round(area, 4), "m^2"
+
+
+def _calculate_tpl_polygon_metrics(
+    points: list[dict[str, Any]],
+    nat_w: int,
+    nat_h: int,
+    class_label: str,
+) -> tuple[float, str]:
+    """
+    TPL bird-eye metric estimation (matches legacy TPL pipeline intent):
+    - crack: use bbox height ratio × TPL system height (m)
+    - area classes: use bbox width ratio × TPL width and bbox height ratio × TPL height
+    """
+    if not points or nat_w <= 0 or nat_h <= 0:
+        return 0.0, ""
+
+    xs = [p["x"] * nat_w for p in points]
+    ys = [p["y"] * nat_h for p in points]
+    x1, x2 = min(xs), max(xs)
+    y1, y2 = min(ys), max(ys)
+
+    width_m = float((x2 - x1) * TPL_SYSTEM_WIDTH_METERS / nat_w)
+    length_m = float((y2 - y1) * TPL_SYSTEM_HEIGHT_METERS / nat_h)
+
+    if class_label.lower() == "crack":
+        return round(length_m, 4), "m"
+    return round(width_m * length_m, 4), "m^2"
 
 
 class _ListWriter(list[str]):
@@ -800,8 +829,13 @@ class ReviewStore:
         points: list[dict[str, Any]],
         nat_w: int,
         nat_h: int,
+        metric_mode: str = "auto",
     ) -> tuple[float, str]:
-        """Compute real-world area/length for a polygon using the linked scale profile."""
+        """Compute real-world area/length for a polygon."""
+        normalized_mode = str(metric_mode or "auto").strip().lower()
+        if normalized_mode == "tpl":
+            return _calculate_tpl_polygon_metrics(points, nat_w, nat_h, class_label)
+
         raw_profile = self.state.get("scale_profile")
         if not raw_profile:
             raise ValueError(

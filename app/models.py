@@ -91,6 +91,7 @@ class AreaCalculationRequest(BaseModel):
     points: list[PolygonPoint]
     image_natural_width: int
     image_natural_height: int
+    metric_mode: str = Field(default="auto", pattern="^(auto|scale_profile|tpl)$")
 
 
 class Sam2SegmentRequest(BaseModel):
