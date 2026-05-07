@@ -227,6 +227,7 @@ def default_scale_profile_path() -> Path | None:
 
 def _calculate_polygon_metrics(
     points: list[dict[str, Any]],
+    centerline_points: list[dict[str, Any]],
     nat_w: int,
     nat_h: int,
     class_label: str,
@@ -235,9 +236,9 @@ def _calculate_polygon_metrics(
     """
     Compute real-world measurement for a normalized polygon.
 
-    For 'crack': perimeter length in metres (sum of edge segments scaled by midpoint row scale).
-    For area classes: scanline integration of pixel rows × per-row x_scale × y_scale → m^2.
-    Returns (value, unit).
+    For 'crack': centerline polyline length in metres when provided.
+    Falls back to legacy perimeter-based approximation for old annotations.
+    For area classes: scanline integration of pixel rows by per-row scales.
     """
     if not points or not scale_profile:
         return 0.0, ""
@@ -246,50 +247,67 @@ def _calculate_polygon_metrics(
     n = len(pixel_pts)
 
     if class_label.lower() == "crack":
-        total = 0.0
+        if centerline_points:
+            centerline_px = [(p["x"] * nat_w, p["y"] * nat_h) for p in centerline_points]
+            if len(centerline_px) >= 2:
+                total_centerline = 0.0
+                for i in range(len(centerline_px) - 1):
+                    x1, y1 = centerline_px[i]
+                    x2, y2 = centerline_px[i + 1]
+                    y_mid = max(0, min(int((y1 + y2) / 2), nat_h - 1))
+                    x_s, y_s = scale_profile.get(y_mid, (0.0, 0.0))
+                    total_centerline += math.sqrt(((x2 - x1) * x_s) ** 2 + ((y2 - y1) * y_s) ** 2)
+                return round(total_centerline, 4), "m"
+
+        # Fallback for non-brush/SAM polygons where explicit centerline is missing:
+        # estimate by major-axis span so thickness does not affect crack length.
+        best = 0.0
+        for i in range(n):
+            x1, y1 = pixel_pts[i]
+            for j in range(i + 1, n):
+                x2, y2 = pixel_pts[j]
+                y_mid = max(0, min(int((y1 + y2) / 2), nat_h - 1))
+                x_s, y_s = scale_profile.get(y_mid, (0.0, 0.0))
+                dist = math.sqrt(((x2 - x1) * x_s) ** 2 + ((y2 - y1) * y_s) ** 2)
+                if dist > best:
+                    best = dist
+        return round(best, 4), "m"
+
+    ys = [p[1] for p in pixel_pts]
+    y_min, y_max = int(math.floor(min(ys))), int(math.ceil(max(ys)))
+    area = 0.0
+    for y in range(y_min, y_max + 1):
+        x_s, y_s = scale_profile.get(y, (0.0, 0.0))
+        if not x_s:
+            continue
+        intersections: list[float] = []
         for i in range(n):
             x1, y1 = pixel_pts[i]
             x2, y2 = pixel_pts[(i + 1) % n]
-            y_mid = max(0, min(int((y1 + y2) / 2), nat_h - 1))
-            x_s, y_s = scale_profile.get(y_mid, (0.0, 0.0))
-            total += math.sqrt(((x2 - x1) * x_s) ** 2 + ((y2 - y1) * y_s) ** 2)
-        return round(total, 4), "m"
-    else:
-        # Scanline area integration
-        ys = [p[1] for p in pixel_pts]
-        y_min, y_max = int(math.floor(min(ys))), int(math.ceil(max(ys)))
-        area = 0.0
-        for y in range(y_min, y_max + 1):
-            x_s, y_s = scale_profile.get(y, (0.0, 0.0))
-            if not x_s:
+            if y1 == y2:
                 continue
-            # Even-odd scanline fill intersections
-            intersections: list[float] = []
-            for i in range(n):
-                x1, y1 = pixel_pts[i]
-                x2, y2 = pixel_pts[(i + 1) % n]
-                if y1 == y2:
-                    continue
-                if min(y1, y2) <= y < max(y1, y2):
-                    t = (y - y1) / (y2 - y1)
-                    intersections.append(x1 + t * (x2 - x1))
-            intersections.sort()
-            for k in range(0, len(intersections) - 1, 2):
-                span_px = intersections[k + 1] - intersections[k]
-                area += span_px * x_s * y_s
-        return round(area, 4), "m^2"
+            if min(y1, y2) <= y < max(y1, y2):
+                t = (y - y1) / (y2 - y1)
+                intersections.append(x1 + t * (x2 - x1))
+        intersections.sort()
+        for k in range(0, len(intersections) - 1, 2):
+            span_px = intersections[k + 1] - intersections[k]
+            area += span_px * x_s * y_s
+    return round(area, 4), "m^2"
 
 
 def _calculate_tpl_polygon_metrics(
     points: list[dict[str, Any]],
+    centerline_points: list[dict[str, Any]],
     nat_w: int,
     nat_h: int,
     class_label: str,
 ) -> tuple[float, str]:
     """
-    TPL bird-eye metric estimation using polygon geometry:
-    - crack: approximate centerline length by polygon perimeter / 2 (anisotropic m/px scaling)
-    - area classes: polygon area (shoelace) × (x_scale * y_scale)
+    TPL bird-eye metric estimation using polygon geometry.
+    - crack: centerline polyline length (anisotropic m/px scaling)
+      fallback: polygon major-axis span in metres
+    - area classes: polygon area (shoelace) by anisotropic scaling
     """
     if not points or nat_w <= 0 or nat_h <= 0:
         return 0.0, ""
@@ -303,14 +321,26 @@ def _calculate_tpl_polygon_metrics(
     y_scale = TPL_SYSTEM_HEIGHT_METERS / nat_h
 
     if class_label.lower() == "crack":
-        perimeter_m = 0.0
+        if centerline_points:
+            centerline_px = [(p["x"] * nat_w, p["y"] * nat_h) for p in centerline_points]
+            if len(centerline_px) >= 2:
+                total_centerline = 0.0
+                for i in range(len(centerline_px) - 1):
+                    x1, y1 = centerline_px[i]
+                    x2, y2 = centerline_px[i + 1]
+                    total_centerline += math.sqrt(((x2 - x1) * x_scale) ** 2 + ((y2 - y1) * y_scale) ** 2)
+                return round(total_centerline, 4), "m"
+
+        best = 0.0
         for i in range(n):
             x1, y1 = pixel_pts[i]
-            x2, y2 = pixel_pts[(i + 1) % n]
-            perimeter_m += math.sqrt(((x2 - x1) * x_scale) ** 2 + ((y2 - y1) * y_scale) ** 2)
-        return round(perimeter_m / 2.0, 4), "m"
+            for j in range(i + 1, n):
+                x2, y2 = pixel_pts[j]
+                dist = math.sqrt(((x2 - x1) * x_scale) ** 2 + ((y2 - y1) * y_scale) ** 2)
+                if dist > best:
+                    best = dist
+        return round(best, 4), "m"
 
-    # Shoelace area in pixel^2 -> convert to m^2 via anisotropic scaling.
     area_px2 = 0.0
     for i in range(n):
         x1, y1 = pixel_pts[i]
@@ -703,6 +733,7 @@ class ReviewStore:
                     id=poly.get("id", ""),
                     class_label=poly.get("class_label", ""),
                     points=[PolygonPoint(**p) for p in poly.get("points", [])],
+                    centerline_points=[PolygonPoint(**p) for p in poly.get("centerline_points", [])],
                     value=poly.get("value"),
                     unit=poly.get("unit", ""),
                     source_object_id=poly.get("source_object_id"),
@@ -841,6 +872,7 @@ class ReviewStore:
         self,
         class_label: str,
         points: list[dict[str, Any]],
+        centerline_points: list[dict[str, Any]],
         nat_w: int,
         nat_h: int,
         metric_mode: str = "auto",
@@ -848,7 +880,7 @@ class ReviewStore:
         """Compute real-world area/length for a polygon."""
         normalized_mode = str(metric_mode or "auto").strip().lower()
         if normalized_mode == "tpl":
-            return _calculate_tpl_polygon_metrics(points, nat_w, nat_h, class_label)
+            return _calculate_tpl_polygon_metrics(points, centerline_points, nat_w, nat_h, class_label)
 
         raw_profile = self.state.get("scale_profile")
         if not raw_profile:
@@ -859,7 +891,14 @@ class ReviewStore:
         scale_profile: ScaleProfile = {
             int(row[0]): (float(row[1]), float(row[2])) for row in raw_profile
         }
-        return _calculate_polygon_metrics(points, nat_w, nat_h, class_label, scale_profile)
+        return _calculate_polygon_metrics(
+            points,
+            centerline_points,
+            nat_w,
+            nat_h,
+            class_label,
+            scale_profile,
+        )
 
     def update_annotations(
         self,

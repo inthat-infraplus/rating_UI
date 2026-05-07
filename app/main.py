@@ -653,10 +653,12 @@ async def calculate_area(request: AreaCalculationRequest) -> JSONResponse:
     """Calculate real-world area (m²) or crack length (m) for a polygon."""
     try:
         points_dicts = [p.model_dump(mode="json") for p in request.points]
+        centerline_points_dicts = [p.model_dump(mode="json") for p in request.centerline_points]
         value, unit = await run_in_threadpool(
             ReviewStore.open(request.folder_path).calculate_polygon_metrics,
             request.class_label,
             points_dicts,
+            centerline_points_dicts,
             request.image_natural_width,
             request.image_natural_height,
             request.metric_mode,

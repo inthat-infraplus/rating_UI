@@ -6,6 +6,7 @@ const state = {
   reviewMode: "decision",
   autoAdvance: true,
   theme: "dark",
+  metricModeOverride: "auto",
   queueCollapsed: true,
   correctionMode: "patch",
   predictionActions: {},
@@ -109,6 +110,7 @@ const viewerWorkspace        = document.querySelector(".viewer-workspace");
 const toggleQuickReviewBtn   = document.getElementById("toggle-quick-review-btn");
 const toggleThemeBtn         = document.getElementById("toggle-theme-btn");
 const toggleThemeNavBtn      = document.getElementById("toggle-theme-nav-btn");
+const toggleMetricModeBtn    = document.getElementById("toggle-metric-mode-btn");
 const toggleAutoAdvanceBtn   = document.getElementById("toggle-auto-advance-btn");
 const batchAcceptModal       = document.getElementById("batch-accept-modal");
 const batchAcceptClose       = document.getElementById("batch-accept-close");
@@ -305,6 +307,14 @@ function applyQueueCollapse() {
 
 function updateTopBarControls() {
   if (toggleAutoAdvanceBtn) toggleAutoAdvanceBtn.textContent = `Auto-Advance: ${state.autoAdvance ? "On" : "Off"}`;
+  if (toggleMetricModeBtn) {
+    const label = state.metricModeOverride === "tpl"
+      ? "TPL"
+      : state.metricModeOverride === "scale_profile"
+        ? "Scale"
+        : "Auto";
+    toggleMetricModeBtn.textContent = `Metric: ${label}`;
+  }
 }
 
 function currentImage() {
@@ -430,8 +440,10 @@ function syncOverlaySize() {
       id: poly.id,
       class_label: poly.class_label,
       points: poly.points.map((p) => normToCanvas(p.x, p.y)),
+      centerline_points: (poly.centerline_points || []).map((p) => normToCanvas(p.x, p.y)),
       value: poly.value ?? null,
       unit: poly.unit || "",
+      brush_generated: Array.isArray(poly.centerline_points) && poly.centerline_points.length >= 2,
       bbox: computePolygonBBox(poly.points.map((p) => normToCanvas(p.x, p.y))),
     }));
   }
@@ -1522,7 +1534,7 @@ function commitBrushStrokeAsPolygon() {
   if (points.length < 3) return null;
   const poly = prepareCommittedPolygon(points);
   poly.brush_generated = true;
-  poly.brush_centerline = centerline;
+  poly.centerline_points = centerline;
   state.finishedPolygons.push(poly);
   state.brushDraftPoints = [];
   return poly;
@@ -1793,6 +1805,7 @@ function prepareCommittedPolygon(canvasPoints) {
     id: genId(),
     class_label: classSelect.value,
     points: canvasPoints,
+    centerline_points: [],
     value: null,
     unit: "",
     source_object_id: replacementObjectId,
@@ -1886,13 +1899,24 @@ async function calculatePolygonArea(poly) {
     String(state.session.folder_path || "").toLowerCase(),
     String(state.session.csv_path || "").toLowerCase(),
   ].some((pathHint) => pathHint.includes("tpl"));
-  const metricMode = hasTplRoadType || hasTplPathHint
+
+  const imageAspect = (mainImage.naturalWidth > 0 && mainImage.naturalHeight > 0)
+    ? (mainImage.naturalWidth / mainImage.naturalHeight)
+    : 0;
+  const tplAspect = 3.63 / 2.49;
+  const isLikelyTplByAspect = imageAspect > 0 && Math.abs(imageAspect - tplAspect) <= 0.08;
+
+  let metricMode = hasTplRoadType || hasTplPathHint || isLikelyTplByAspect
     ? "tpl"
     : (state.session.scale_profile_path ? "scale_profile" : "auto");
+  if (state.metricModeOverride !== "auto") {
+    metricMode = state.metricModeOverride;
+  }
 
   if (metricMode === "auto") return;
 
   const normPoints = poly.points.map((pt) => canvasToNorm(pt.x, pt.y));
+  const normCenterlinePoints = (poly.centerline_points || []).map((pt) => canvasToNorm(pt.x, pt.y));
 
   try {
     const response = await api("/api/calculate-area", {
@@ -1901,6 +1925,7 @@ async function calculatePolygonArea(poly) {
         folder_path: state.session.folder_path,
         class_label: poly.class_label,
         points: normPoints,
+        centerline_points: normCenterlinePoints,
         image_natural_width: mainImage.naturalWidth || 1,
         image_natural_height: mainImage.naturalHeight || 1,
         metric_mode: metricMode,
@@ -1908,17 +1933,8 @@ async function calculatePolygonArea(poly) {
     });
     const result = await response.json();
     // Update the polygon in-place with real-world value
-    let value = result.value;
+    const value = result.value;
     const unit = result.unit;
-    // Brush masks for crack are narrow closed polygons; backend computes perimeter,
-    // so approximate centerline length by halving the perimeter result.
-    if (
-      poly.brush_generated &&
-      String(poly.class_label || "").toLowerCase() === "crack" &&
-      typeof value === "number"
-    ) {
-      value = Math.round((value / 2) * 10000) / 10000;
-    }
     poly.value = value;
     poly.unit  = unit;
     redrawCanvas();
@@ -2202,6 +2218,7 @@ async function saveAnnotations() {
     id: poly.id,
     class_label: poly.class_label,
     points: poly.points.map((pt) => canvasToNorm(pt.x, pt.y)),
+    centerline_points: (poly.centerline_points || []).map((pt) => canvasToNorm(pt.x, pt.y)),
     value: poly.value ?? null,
     unit: poly.unit || "",
     source_object_id: poly.source_object_id ?? null,
@@ -2364,10 +2381,12 @@ function loadPolygonsForCurrentImage() {
       id: poly.id,
       class_label: poly.class_label,
       points: poly.points.map((p) => normToCanvas(p.x, p.y)),
+      centerline_points: (poly.centerline_points || []).map((p) => normToCanvas(p.x, p.y)),
       value: poly.value ?? null,
       unit: poly.unit || "",
       source_object_id: poly.source_object_id ?? null,
       merge_action: poly.merge_action || "add",
+      brush_generated: Array.isArray(poly.centerline_points) && poly.centerline_points.length >= 2,
       bbox: computePolygonBBox(poly.points.map((p) => normToCanvas(p.x, p.y))),
     }));
   } else {
@@ -3146,6 +3165,16 @@ toggleThemeNavBtn?.addEventListener("click", () => {
 toggleAutoAdvanceBtn?.addEventListener("click", () => {
   state.autoAdvance = !state.autoAdvance;
   render();
+});
+
+toggleMetricModeBtn?.addEventListener("click", () => {
+  state.metricModeOverride = state.metricModeOverride === "auto"
+    ? "tpl"
+    : state.metricModeOverride === "tpl"
+      ? "scale_profile"
+      : "auto";
+  updateTopBarControls();
+  showToast(`Metric mode: ${state.metricModeOverride}`);
 });
 
 batchAcceptBtn?.addEventListener("click", () => {

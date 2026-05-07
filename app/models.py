@@ -63,8 +63,9 @@ class PolygonAnnotation(BaseModel):
     id: str
     class_label: str
     points: list[PolygonPoint]
-    value: float | None = None   # Real-world measurement (m or m²) from scale profile
-    unit: str = ""               # "m" for crack length, "m²" for area classes
+    centerline_points: list[PolygonPoint] = Field(default_factory=list)
+    value: float | None = None   # Real-world measurement (m or m^2) from scale profile
+    unit: str = ""               # "m" for crack length, "m^2" for area classes
     source_object_id: int | None = None
     merge_action: str = Field(default="add", pattern="^(add|replace)$")
 
@@ -89,6 +90,7 @@ class AreaCalculationRequest(BaseModel):
     folder_path: str = Field(..., min_length=1)
     class_label: str
     points: list[PolygonPoint]
+    centerline_points: list[PolygonPoint] = Field(default_factory=list)
     image_natural_width: int
     image_natural_height: int
     metric_mode: str = Field(default="auto", pattern="^(auto|scale_profile|tpl)$")
