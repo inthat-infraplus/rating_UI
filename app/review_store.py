@@ -243,6 +243,45 @@ def _calculate_polygon_metrics(
     if not points or not scale_profile:
         return 0.0, ""
 
+
+def _interpolated_scale_for_y(scale_profile: ScaleProfile, y: float, nat_h: int) -> tuple[float, float]:
+    """Return (x_scale, y_scale) for an arbitrary (possibly fractional) image row y.
+
+    The scale_profile keys are integer row indices. If an exact row is not present
+    we linearly interpolate between the nearest available rows. If y is outside
+    the available range the nearest row scale is returned.
+    """
+    if not scale_profile:
+        return 0.0, 0.0
+    # Clamp y to image valid range
+    y_clamped = max(0.0, min(float(y), max(0.0, nat_h - 1)))
+    keys = sorted(scale_profile.keys())
+    if not keys:
+        return 0.0, 0.0
+    yi = int(round(y_clamped))
+    if yi in scale_profile:
+        return scale_profile[yi]
+
+    # Find neighbours for interpolation
+    lower = None
+    upper = None
+    for k in keys:
+        if k <= y_clamped:
+            lower = k
+        if k > y_clamped:
+            upper = k
+            break
+
+    if lower is None:
+        return scale_profile[upper]
+    if upper is None:
+        return scale_profile[lower]
+
+    x0, y0 = scale_profile[lower]
+    x1, y1 = scale_profile[upper]
+    t = (y_clamped - lower) / (upper - lower) if upper != lower else 0.0
+    return (x0 + t * (x1 - x0), y0 + t * (y1 - y0))
+
     pixel_pts = [(p["x"] * nat_w, p["y"] * nat_h) for p in points]
     n = len(pixel_pts)
 
@@ -254,8 +293,8 @@ def _calculate_polygon_metrics(
                 for i in range(len(centerline_px) - 1):
                     x1, y1 = centerline_px[i]
                     x2, y2 = centerline_px[i + 1]
-                    y_mid = max(0, min(int((y1 + y2) / 2), nat_h - 1))
-                    x_s, y_s = scale_profile.get(y_mid, (0.0, 0.0))
+                    y_mid = (y1 + y2) / 2.0
+                    x_s, y_s = _interpolated_scale_for_y(scale_profile, y_mid, nat_h)
                     total_centerline += math.sqrt(((x2 - x1) * x_s) ** 2 + ((y2 - y1) * y_s) ** 2)
                 return round(total_centerline, 4), "m"
 
@@ -266,8 +305,8 @@ def _calculate_polygon_metrics(
             x1, y1 = pixel_pts[i]
             for j in range(i + 1, n):
                 x2, y2 = pixel_pts[j]
-                y_mid = max(0, min(int((y1 + y2) / 2), nat_h - 1))
-                x_s, y_s = scale_profile.get(y_mid, (0.0, 0.0))
+                y_mid = (y1 + y2) / 2.0
+                x_s, y_s = _interpolated_scale_for_y(scale_profile, y_mid, nat_h)
                 dist = math.sqrt(((x2 - x1) * x_s) ** 2 + ((y2 - y1) * y_s) ** 2)
                 if dist > best:
                     best = dist
@@ -277,7 +316,7 @@ def _calculate_polygon_metrics(
     y_min, y_max = int(math.floor(min(ys))), int(math.ceil(max(ys)))
     area = 0.0
     for y in range(y_min, y_max + 1):
-        x_s, y_s = scale_profile.get(y, (0.0, 0.0))
+        x_s, y_s = _interpolated_scale_for_y(scale_profile, float(y), nat_h)
         if not x_s:
             continue
         intersections: list[float] = []
