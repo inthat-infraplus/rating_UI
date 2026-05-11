@@ -144,6 +144,17 @@ body {
   font-weight: 600;
 }
 
+/* Disabled/greyed control group for when scale profile is not editable (TPL mode) */
+.scale-disabled {
+  opacity: 0.55;
+  filter: grayscale(60%);
+}
+.scale-disabled .form-control,
+.scale-disabled .btn {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
 /* ── Workflow guide panel ─────────────────────────────────────────────────── */
 .workflow-panel {
   background: var(--panel-bg);

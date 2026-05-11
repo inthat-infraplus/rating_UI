@@ -2581,6 +2581,29 @@ function render() {
     csvPathInput.value = "";
     scaleProfilePathInput.value = "";
   }
+  updateScaleProfileUi();
+}
+
+function updateScaleProfileUi() {
+  const isTpl = state.metricModeOverride === "tpl";
+  // Visual cue: grey-out the whole setup row containing the scale profile inputs
+  if (!scaleProfilePathInput) return;
+  const setupRow = scaleProfilePathInput.closest(".setup-row");
+  if (setupRow) {
+    setupRow.classList.toggle("scale-disabled", isTpl);
+  }
+  // Also disable the inputs/buttons so they cannot be interacted with
+  const controls = [scaleProfilePathInput, loadScaleProfileBtn, browseScaleProfileBtn, scaleProfileFileInput];
+  for (const el of controls) {
+    if (!el) continue;
+    el.disabled = !!isTpl;
+  }
+  // Update status text for clarity
+  if (scaleStatusText) {
+    scaleStatusText.textContent = isTpl
+      ? "Scale profile not used in TPL mode"
+      : (state.session && state.session.scale_profile_path) ? state.session.scale_profile_path : "No scale profile linked";
+  }
 }
 
 // ── Folder actions ───────────────────────────────────────────────────────────
@@ -3175,6 +3198,7 @@ toggleMetricModeBtn?.addEventListener("click", () => {
       : "auto";
   updateTopBarControls();
   showToast(`Metric mode: ${state.metricModeOverride}`);
+  updateScaleProfileUi();
 });
 
 batchAcceptBtn?.addEventListener("click", () => {
