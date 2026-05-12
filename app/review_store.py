@@ -242,48 +242,13 @@ def _calculate_polygon_metrics(
     """
     if not points or not scale_profile:
         return 0.0, ""
-
-
-def _interpolated_scale_for_y(scale_profile: ScaleProfile, y: float, nat_h: int) -> tuple[float, float]:
-    """Return (x_scale, y_scale) for an arbitrary (possibly fractional) image row y.
-
-    The scale_profile keys are integer row indices. If an exact row is not present
-    we linearly interpolate between the nearest available rows. If y is outside
-    the available range the nearest row scale is returned.
-    """
-    if not scale_profile:
-        return 0.0, 0.0
-    # Clamp y to image valid range
-    y_clamped = max(0.0, min(float(y), max(0.0, nat_h - 1)))
-    keys = sorted(scale_profile.keys())
-    if not keys:
-        return 0.0, 0.0
-    yi = int(round(y_clamped))
-    if yi in scale_profile:
-        return scale_profile[yi]
-
-    # Find neighbours for interpolation
-    lower = None
-    upper = None
-    for k in keys:
-        if k <= y_clamped:
-            lower = k
-        if k > y_clamped:
-            upper = k
-            break
-
-    if lower is None:
-        return scale_profile[upper]
-    if upper is None:
-        return scale_profile[lower]
-
-    x0, y0 = scale_profile[lower]
-    x1, y1 = scale_profile[upper]
-    t = (y_clamped - lower) / (upper - lower) if upper != lower else 0.0
-    return (x0 + t * (x1 - x0), y0 + t * (y1 - y0))
+    if nat_w <= 0 or nat_h <= 0:
+        return 0.0, ""
 
     pixel_pts = [(p["x"] * nat_w, p["y"] * nat_h) for p in points]
     n = len(pixel_pts)
+    if n < 3:
+        return 0.0, ""
 
     if class_label.lower() == "crack":
         if centerline_points:
@@ -334,6 +299,44 @@ def _interpolated_scale_for_y(scale_profile: ScaleProfile, y: float, nat_h: int)
             area += span_px * x_s * y_s
     return round(area, 4), "m^2"
 
+
+def _interpolated_scale_for_y(scale_profile: ScaleProfile, y: float, nat_h: int) -> tuple[float, float]:
+    """Return (x_scale, y_scale) for an arbitrary (possibly fractional) image row y.
+
+    The scale_profile keys are integer row indices. If an exact row is not present
+    we linearly interpolate between the nearest available rows. If y is outside
+    the available range the nearest row scale is returned.
+    """
+    if not scale_profile:
+        return 0.0, 0.0
+    # Clamp y to image valid range
+    y_clamped = max(0.0, min(float(y), max(0.0, nat_h - 1)))
+    keys = sorted(scale_profile.keys())
+    if not keys:
+        return 0.0, 0.0
+    yi = int(round(y_clamped))
+    if yi in scale_profile:
+        return scale_profile[yi]
+
+    # Find neighbours for interpolation
+    lower = None
+    upper = None
+    for k in keys:
+        if k <= y_clamped:
+            lower = k
+        if k > y_clamped:
+            upper = k
+            break
+
+    if lower is None:
+        return scale_profile[upper]
+    if upper is None:
+        return scale_profile[lower]
+
+    x0, y0 = scale_profile[lower]
+    x1, y1 = scale_profile[upper]
+    t = (y_clamped - lower) / (upper - lower) if upper != lower else 0.0
+    return (x0 + t * (x1 - x0), y0 + t * (y1 - y0))
 
 def _calculate_tpl_polygon_metrics(
     points: list[dict[str, Any]],
@@ -930,7 +933,7 @@ class ReviewStore:
         scale_profile: ScaleProfile = {
             int(row[0]): (float(row[1]), float(row[2])) for row in raw_profile
         }
-        return _calculate_polygon_metrics(
+        result = _calculate_polygon_metrics(
             points,
             centerline_points,
             nat_w,
@@ -938,6 +941,9 @@ class ReviewStore:
             class_label,
             scale_profile,
         )
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise ValueError("Unable to calculate polygon metrics for this annotation.")
+        return result
 
     def update_annotations(
         self,
