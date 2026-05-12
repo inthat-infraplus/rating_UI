@@ -58,7 +58,11 @@ const state = {
   sam2SuppressClick: false,
   sam2BoxDraftStart: null,
   sam2BoxDraftCurrent: null,
+  sam2BoxInteraction: null, // {kind:"move"|"resize", handle, startPoint, startRect}
 };
+
+const SAM2_BOX_MIN_SIZE = 8;
+const SAM2_BOX_HANDLE_RADIUS = 9;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const folderPathInput        = document.getElementById("folder-path-input");
@@ -378,6 +382,151 @@ function clampZoom(value) {
   return Math.max(1, Math.min(4, Number(value) || 1));
 }
 
+function normalizeCanvasRect(rect) {
+  return {
+    x1: Math.min(rect.x1, rect.x2),
+    y1: Math.min(rect.y1, rect.y2),
+    x2: Math.max(rect.x1, rect.x2),
+    y2: Math.max(rect.y1, rect.y2),
+  };
+}
+
+function sam2BoxToCanvasRect(box = state.sam2Box) {
+  if (!box) return null;
+  return normalizeCanvasRect({
+    x1: box.x1 * annotationCanvas.width,
+    y1: box.y1 * annotationCanvas.height,
+    x2: box.x2 * annotationCanvas.width,
+    y2: box.y2 * annotationCanvas.height,
+  });
+}
+
+function canvasRectToSam2Box(rect) {
+  const normalized = normalizeCanvasRect(rect);
+  return {
+    x1: clamp01(normalized.x1 / annotationCanvas.width),
+    y1: clamp01(normalized.y1 / annotationCanvas.height),
+    x2: clamp01(normalized.x2 / annotationCanvas.width),
+    y2: clamp01(normalized.y2 / annotationCanvas.height),
+  };
+}
+
+function sam2BoxHandleCenter(rect, handle) {
+  const midX = (rect.x1 + rect.x2) / 2;
+  const midY = (rect.y1 + rect.y2) / 2;
+  switch (handle) {
+    case "nw": return { x: rect.x1, y: rect.y1 };
+    case "n": return { x: midX, y: rect.y1 };
+    case "ne": return { x: rect.x2, y: rect.y1 };
+    case "e": return { x: rect.x2, y: midY };
+    case "se": return { x: rect.x2, y: rect.y2 };
+    case "s": return { x: midX, y: rect.y2 };
+    case "sw": return { x: rect.x1, y: rect.y2 };
+    case "w": return { x: rect.x1, y: midY };
+    default: return null;
+  }
+}
+
+function sam2BoxCursorForHandle(handle) {
+  switch (handle) {
+    case "n":
+    case "s":
+      return "ns-resize";
+    case "e":
+    case "w":
+      return "ew-resize";
+    case "nw":
+    case "se":
+      return "nwse-resize";
+    case "ne":
+    case "sw":
+      return "nesw-resize";
+    default:
+      return "move";
+  }
+}
+
+function hitTestSam2BoxControl(canvasPt) {
+  const rect = sam2BoxToCanvasRect();
+  if (!rect) return null;
+  const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  for (const handle of handles) {
+    const center = sam2BoxHandleCenter(rect, handle);
+    if (!center) continue;
+    const distance = Math.hypot(canvasPt.x - center.x, canvasPt.y - center.y);
+    if (distance <= SAM2_BOX_HANDLE_RADIUS) {
+      return { kind: "resize", handle, rect };
+    }
+  }
+  const inside =
+    canvasPt.x >= rect.x1 &&
+    canvasPt.x <= rect.x2 &&
+    canvasPt.y >= rect.y1 &&
+    canvasPt.y <= rect.y2;
+  return inside ? { kind: "move", handle: "move", rect } : null;
+}
+
+function applySam2BoxInteraction(interaction, canvasPt) {
+  if (!interaction) return false;
+  const maxX = annotationCanvas.width;
+  const maxY = annotationCanvas.height;
+  const startRect = interaction.startRect;
+  let nextRect = { ...startRect };
+
+  if (interaction.kind === "move") {
+    const width = startRect.x2 - startRect.x1;
+    const height = startRect.y2 - startRect.y1;
+    let x1 = startRect.x1 + (canvasPt.x - interaction.startPoint.x);
+    let y1 = startRect.y1 + (canvasPt.y - interaction.startPoint.y);
+    x1 = Math.max(0, Math.min(maxX - width, x1));
+    y1 = Math.max(0, Math.min(maxY - height, y1));
+    nextRect = {
+      x1,
+      y1,
+      x2: x1 + width,
+      y2: y1 + height,
+    };
+  } else {
+    if (interaction.handle.includes("w")) {
+      nextRect.x1 = Math.max(0, Math.min(startRect.x2 - SAM2_BOX_MIN_SIZE, canvasPt.x));
+    }
+    if (interaction.handle.includes("e")) {
+      nextRect.x2 = Math.min(maxX, Math.max(startRect.x1 + SAM2_BOX_MIN_SIZE, canvasPt.x));
+    }
+    if (interaction.handle.includes("n")) {
+      nextRect.y1 = Math.max(0, Math.min(startRect.y2 - SAM2_BOX_MIN_SIZE, canvasPt.y));
+    }
+    if (interaction.handle.includes("s")) {
+      nextRect.y2 = Math.min(maxY, Math.max(startRect.y1 + SAM2_BOX_MIN_SIZE, canvasPt.y));
+    }
+  }
+
+  const normalized = normalizeCanvasRect(nextRect);
+  const width = normalized.x2 - normalized.x1;
+  const height = normalized.y2 - normalized.y1;
+  if (width < SAM2_BOX_MIN_SIZE || height < SAM2_BOX_MIN_SIZE) return false;
+  state.sam2Box = canvasRectToSam2Box(normalized);
+  return true;
+}
+
+function updateSam2Cursor(canvasPt = null) {
+  if (!annotationCanvas) return;
+  if (!state.sam2Mode || state.sam2PromptSource !== "box") {
+    annotationCanvas.style.cursor = "";
+    return;
+  }
+  const interaction = state.sam2BoxInteraction || (canvasPt ? hitTestSam2BoxControl(canvasPt) : null);
+  if (interaction?.kind === "move") {
+    annotationCanvas.style.cursor = "move";
+    return;
+  }
+  if (interaction?.kind === "resize") {
+    annotationCanvas.style.cursor = sam2BoxCursorForHandle(interaction.handle);
+    return;
+  }
+  annotationCanvas.style.cursor = "crosshair";
+}
+
 function updateZoomLabel() {
   if (zoomValueLabel) zoomValueLabel.textContent = `${Math.round(state.viewerZoom * 100)}%`;
 }
@@ -620,7 +769,13 @@ function drawPolygonBadge(cx, cy, classLabel, value, unit, accentColor) {
 }
 
 function hasPendingSam2Draft() {
-  return state.sam2Points.length > 0 || state.sam2PreviewPolygons.length > 0 || state.sam2Pending;
+  return (
+    state.sam2Points.length > 0 ||
+    !!state.sam2Box ||
+    !!state.sam2BoxDraftStart ||
+    state.sam2PreviewPolygons.length > 0 ||
+    state.sam2Pending
+  );
 }
 
 function resetSam2Draft() {
@@ -633,6 +788,8 @@ function resetSam2Draft() {
   state.sam2SuppressClick = false;
   state.sam2BoxDraftStart = null;
   state.sam2BoxDraftCurrent = null;
+  state.sam2BoxInteraction = null;
+  updateSam2Cursor();
 }
 
 function ensureNoPendingSam2Draft(actionLabel = "continue") {
@@ -692,12 +849,12 @@ function currentSam2BoxDraft() {
   if (!state.sam2BoxDraftStart || !state.sam2BoxDraftCurrent) return null;
   const start = state.sam2BoxDraftStart;
   const end = state.sam2BoxDraftCurrent;
-  return {
+  return normalizeCanvasRect({
     x1: Math.min(start.x, end.x),
     y1: Math.min(start.y, end.y),
     x2: Math.max(start.x, end.x),
     y2: Math.max(start.y, end.y),
-  };
+  });
 }
 
 function polygonUi(poly) {
@@ -1099,14 +1256,7 @@ function redrawCanvas() {
     drawPolygonBadge(cx, cy, "SAM3 Preview", null, "", "#7c3aed");
   }
 
-  const committedBox = state.sam2Box
-    ? {
-        x1: state.sam2Box.x1 * annotationCanvas.width,
-        y1: state.sam2Box.y1 * annotationCanvas.height,
-        x2: state.sam2Box.x2 * annotationCanvas.width,
-        y2: state.sam2Box.y2 * annotationCanvas.height,
-      }
-    : null;
+  const committedBox = sam2BoxToCanvasRect();
   const draftingBox = currentSam2BoxDraft();
   const previewBox = draftingBox || committedBox;
   if (previewBox) {
@@ -1128,6 +1278,20 @@ function redrawCanvas() {
       Math.max(1, previewBox.x2 - previewBox.x1),
       Math.max(1, previewBox.y2 - previewBox.y1),
     );
+    if (!draftingBox) {
+      const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+      for (const handle of handles) {
+        const center = sam2BoxHandleCenter(previewBox, handle);
+        if (!center) continue;
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(37, 99, 235, 0.95)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
     ctx.restore();
   }
 
@@ -1602,6 +1766,7 @@ function setSam2PromptSource(kind, { resetDraft = true } = {}) {
       state.sam2Box = null;
       state.sam2BoxDraftStart = null;
       state.sam2BoxDraftCurrent = null;
+      state.sam2BoxInteraction = null;
     }
   }
   state.sam2PromptSource = nextSource;
@@ -1609,6 +1774,7 @@ function setSam2PromptSource(kind, { resetDraft = true } = {}) {
   sam2BoxModeBtn?.classList.toggle("active", state.sam2PromptSource === "box");
   sam2PositiveBtn?.toggleAttribute("disabled", state.sam2PromptSource !== "point");
   sam2NegativeBtn?.toggleAttribute("disabled", state.sam2PromptSource !== "point");
+  updateSam2Cursor();
   updateAnnotationToolbar();
   redrawCanvas();
 }
@@ -1630,6 +1796,7 @@ function enterSam2Mode() {
   if (sam2ToolBtn) sam2ToolBtn.classList.add("active");
   setSam2PromptType(state.sam2PromptType);
   setSam2PromptSource(state.sam2PromptSource, { resetDraft: false });
+  updateSam2Cursor();
   updateAnnotationToolbar();
   redrawCanvas();
 }
@@ -1644,6 +1811,8 @@ function exitSam2Mode() {
   }
   if (sam2ToolBtn) sam2ToolBtn.classList.remove("active");
   state.sam2DraggingIndex = -1;
+  state.sam2BoxInteraction = null;
+  updateSam2Cursor();
   updateAnnotationToolbar();
 }
 
@@ -1751,22 +1920,20 @@ function commitSam2BoxDraft() {
   state.sam2BoxDraftStart = null;
   state.sam2BoxDraftCurrent = null;
   if (!draft) {
+    updateSam2Cursor();
     redrawCanvas();
     return;
   }
   const width = draft.x2 - draft.x1;
   const height = draft.y2 - draft.y1;
-  if (width < 8 || height < 8) {
+  if (width < SAM2_BOX_MIN_SIZE || height < SAM2_BOX_MIN_SIZE) {
     showToast("Box prompt is too small. Drag a larger area.");
+    updateSam2Cursor();
     redrawCanvas();
     return;
   }
-  state.sam2Box = {
-    x1: clamp01(draft.x1 / annotationCanvas.width),
-    y1: clamp01(draft.y1 / annotationCanvas.height),
-    x2: clamp01(draft.x2 / annotationCanvas.width),
-    y2: clamp01(draft.y2 / annotationCanvas.height),
-  };
+  state.sam2Box = canvasRectToSam2Box(draft);
+  updateSam2Cursor();
   redrawCanvas();
   queueSam2Inference(0);
 }
@@ -1774,6 +1941,9 @@ function commitSam2BoxDraft() {
 function undoSam2Prompt() {
   if (state.sam2PromptSource === "box") {
     state.sam2Box = null;
+    state.sam2BoxDraftStart = null;
+    state.sam2BoxDraftCurrent = null;
+    state.sam2BoxInteraction = null;
   } else if (state.sam2Points.length) {
     state.sam2Points.pop();
   } else if (state.sam2Box) {
@@ -1782,6 +1952,7 @@ function undoSam2Prompt() {
     return;
   }
   state.sam2PreviewPolygons = [];
+  updateSam2Cursor();
   updateAnnotationToolbar();
   redrawCanvas();
   queueSam2Inference(0);
@@ -1967,8 +2138,19 @@ annotationCanvas.addEventListener("mousedown", (e) => {
   if (!state.sam2Mode) return;
   if (state.sam2PromptSource === "box") {
     const canvasPt = getCanvasPos(e);
+    const interaction = hitTestSam2BoxControl(canvasPt);
+    if (interaction) {
+      state.sam2BoxInteraction = {
+        ...interaction,
+        startPoint: canvasPt,
+        startRect: { ...interaction.rect },
+      };
+      updateSam2Cursor(canvasPt);
+      return;
+    }
     state.sam2BoxDraftStart = canvasPt;
     state.sam2BoxDraftCurrent = canvasPt;
+    updateSam2Cursor(canvasPt);
     redrawCanvas();
     return;
   }
@@ -2034,15 +2216,16 @@ annotationCanvas.addEventListener("dblclick", (e) => {
 });
 
 annotationCanvas.addEventListener("mousemove", (e) => {
+  const canvasPt = getCanvasPos(e);
   if (!state.drawMode && !state.sam2Mode && !state.brushMode && !state.eraserMode) {
-    const hoverId = hitTestFinishedMask(getCanvasPos(e));
+    const hoverId = hitTestFinishedMask(canvasPt);
     if (hoverId !== state.hoverMaskId) {
       state.hoverMaskId = hoverId;
       redrawCanvas();
     }
   }
   if ((state.brushMode || state.eraserMode) && state.brushStrokeActive) {
-    const point = getCanvasPos(e);
+    const point = canvasPt;
     if (state.brushMode) {
       pushBrushSample(point);
     } else {
@@ -2053,13 +2236,21 @@ annotationCanvas.addEventListener("mousemove", (e) => {
     redrawCanvas();
     return;
   }
+  if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxInteraction) {
+    if (applySam2BoxInteraction(state.sam2BoxInteraction, canvasPt)) {
+      redrawCanvas();
+      queueSam2Inference();
+    }
+    updateSam2Cursor(canvasPt);
+    return;
+  }
   if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
-    state.sam2BoxDraftCurrent = getCanvasPos(e);
+    state.sam2BoxDraftCurrent = canvasPt;
+    updateSam2Cursor(canvasPt);
     redrawCanvas();
     return;
   }
   if (state.sam2Mode && state.sam2DraggingIndex !== -1) {
-    const canvasPt = getCanvasPos(e);
     const norm = canvasToNorm(canvasPt.x, canvasPt.y);
     state.sam2Points[state.sam2DraggingIndex] = {
       ...state.sam2Points[state.sam2DraggingIndex],
@@ -2071,8 +2262,12 @@ annotationCanvas.addEventListener("mousemove", (e) => {
     queueSam2Inference();
     return;
   }
+  if (state.sam2Mode && state.sam2PromptSource === "box") {
+    updateSam2Cursor(canvasPt);
+    return;
+  }
   if (!state.drawMode) return;
-  state.mousePt = getCanvasPos(e);
+  state.mousePt = canvasPt;
   redrawCanvas();
 });
 
@@ -2089,6 +2284,12 @@ annotationCanvas.addEventListener("mouseup", () => {
   if (!state.sam2Mode) return;
   if (state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
     commitSam2BoxDraft();
+    return;
+  }
+  if (state.sam2PromptSource === "box" && state.sam2BoxInteraction) {
+    state.sam2BoxInteraction = null;
+    updateSam2Cursor();
+    queueSam2Inference(0);
     return;
   }
   if (state.sam2DraggingIndex !== -1) {
@@ -2112,6 +2313,12 @@ window.addEventListener("mouseup", () => {
     commitSam2BoxDraft();
     return;
   }
+  if (state.sam2PromptSource === "box" && state.sam2BoxInteraction) {
+    state.sam2BoxInteraction = null;
+    updateSam2Cursor();
+    queueSam2Inference(0);
+    return;
+  }
   if (state.sam2DraggingIndex !== -1) {
     state.sam2DraggingIndex = -1;
     queueSam2Inference(0);
@@ -2125,7 +2332,14 @@ annotationCanvas.addEventListener("mouseleave", () => {
     return;
   }
   if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxDraftStart) {
+    updateSam2Cursor();
     redrawCanvas();
+    return;
+  }
+  if (state.sam2Mode && state.sam2PromptSource === "box" && state.sam2BoxInteraction) {
+    state.sam2BoxInteraction = null;
+    updateSam2Cursor();
+    queueSam2Inference(0);
     return;
   }
   if (state.sam2Mode && state.sam2DraggingIndex !== -1) {
@@ -2133,6 +2347,7 @@ annotationCanvas.addEventListener("mouseleave", () => {
     queueSam2Inference(0);
   }
   state.mousePt = null;
+  updateSam2Cursor();
   redrawCanvas();
 });
 
@@ -2156,17 +2371,22 @@ function updateAnnotationToolbar() {
       ? "Draw one box around the pavement — SAM3 will predict from the box prompt"
       : "Add green inclusion and red exclusion points — SAM3 updates the preview live";
   }
+  if (annotHintSam2 && state.sam2PromptSource === "box") {
+    annotHintSam2.textContent = state.sam2Box
+      ? "Drag inside the box to move it, or drag edges and corners to resize it - SAM3 updates the preview live"
+      : "Drag to place a box prompt around the pavement - SAM3 will predict from that rectangle";
+  }
   if (annotHintSam2Live) {
     annotHintSam2Live.style.display = hasPendingSam2Draft() ? "" : "none";
   }
   if (sam2PromptCountLabel) {
     const pointCount = state.sam2Points.length;
-    const boxCount = state.sam2Box ? 1 : 0;
+    const boxCount = (state.sam2Box || state.sam2BoxDraftStart) ? 1 : 0;
     const promptCount = pointCount + boxCount;
     sam2PromptCountLabel.textContent = `${promptCount} prompt${promptCount !== 1 ? "s" : ""}`;
     sam2PromptCountLabel.style.display = sam2DraftActive ? "" : "none";
   }
-  if (sam2UndoBtn) sam2UndoBtn.disabled = state.sam2Points.length === 0;
+  if (sam2UndoBtn) sam2UndoBtn.disabled = state.sam2Points.length === 0 && !state.sam2Box && !state.sam2BoxDraftStart;
   if (sam2ClearBtn) sam2ClearBtn.disabled = !hasPendingSam2Draft();
   if (sam2ConfirmBtn) {
     sam2ConfirmBtn.disabled = state.sam2PreviewPolygons.length === 0 || state.sam2Pending;
