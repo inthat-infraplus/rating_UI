@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
@@ -470,6 +471,31 @@ def infer_export_base_name(images: list[ImageRecord], session_key: str) -> str:
         return f"rating_{first_tokens.pop()}"
 
     return f"rating_mixed_{session_key}"
+
+
+def _surface_bucket_from_text(value: str) -> str | None:
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower())
+    if not normalized:
+        return None
+    if re.search(r"\b(cc|concrete|cementconcrete|concretecement)\b", normalized):
+        return "CC"
+    if re.search(r"\b(ac|asphalt|asphaltconcrete)\b", normalized):
+        return "AC"
+    return None
+
+
+def export_surface_folder(image: ImageRecord) -> str:
+    for box in image.prediction_boxes:
+        bucket = _surface_bucket_from_text(box.road_type)
+        if bucket:
+            return bucket
+
+    for candidate in (image.relative_path, image.filename):
+        bucket = _surface_bucket_from_text(candidate)
+        if bucket:
+            return bucket
+
+    return "Unknown"
 
 
 def _new_state_payload(folder: Path, session_key: str) -> dict[str, Any]:
@@ -1234,6 +1260,7 @@ class ReviewStore:
 
         manifest_rows = []
         target_paths_by_relative_path: dict[str, Path] = {}
+        export_relative_paths: dict[str, str] = {}
         missing_targets = []
         for index, item in enumerate(selected_images, start=1):
             try:
@@ -1242,13 +1269,18 @@ class ReviewStore:
                 missing_targets.append(item.relative_path)
                 continue
 
+            surface_folder = export_surface_folder(item)
+            export_relative_path = Path(surface_folder, item.relative_path).as_posix()
             target_paths_by_relative_path[item.relative_path] = target_path
+            export_relative_paths[item.relative_path] = export_relative_path
 
             manifest_rows.append(
                 {
                     "index": index,
                     "filename": item.filename,
                     "relative_path": item.relative_path,
+                    "surface_folder": surface_folder,
+                    "export_relative_path": export_relative_path,
                     "source_path": str((self.folder / item.relative_path).resolve()),
                     "target_filename": target_path.name,
                     "target_relative_path": item.relative_path,
@@ -1282,27 +1314,28 @@ class ReviewStore:
 
             for item in selected_images:
                 target_path = target_paths_by_relative_path[item.relative_path]
+                export_relative_path = export_relative_paths[item.relative_path]
                 img_state   = self.state["images"].get(item.relative_path, {})
                 polygons    = img_state.get("polygons", [])
 
                 # ── images/ — clean originals (use directly for YOLO training)
-                zip_file.write(target_path, arcname=f"images/{item.relative_path}")
+                zip_file.write(target_path, arcname=f"images/{export_relative_path}")
 
                 # ── annotated/ — polygon overlays for visual review
                 if polygons:
                     try:
                         annotated_bytes = render_annotation_on_image(target_path, polygons)
-                        stem = Path(item.relative_path).stem
-                        parent = Path(item.relative_path).parent.as_posix()
+                        stem = Path(export_relative_path).stem
+                        parent = Path(export_relative_path).parent.as_posix()
                         ann_path = f"{parent}/{stem}_annotated.jpg" if parent != "." else f"{stem}_annotated.jpg"
                         zip_file.writestr(f"annotated/{ann_path}", annotated_bytes)
                     except Exception:
                         # If rendering fails, fall back to the clean image
-                        zip_file.write(target_path, arcname=f"annotated/{item.relative_path}")
+                        zip_file.write(target_path, arcname=f"annotated/{export_relative_path}")
 
                     # ── labels/ — YOLO segmentation label files
                     label_txt  = build_yolo_label(polygons)
-                    label_rel  = Path(item.relative_path).with_suffix(".txt").as_posix()
+                    label_rel  = Path(export_relative_path).with_suffix(".txt").as_posix()
                     zip_file.writestr(f"labels/{label_rel}", label_txt)
 
         return tmp_path, export_name, len(selected_images)
