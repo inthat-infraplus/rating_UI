@@ -594,6 +594,7 @@ async def update_annotations(request: ImageAnnotationUpdateRequest) -> JSONRespo
             [poly.model_dump(mode="json") for poly in request.polygons],
             request.image_natural_width,
             request.image_natural_height,
+            request.exclude_from_csv,
             request.correction_mode,
             request.prediction_actions,
             request.prediction_class_overrides,

@@ -736,6 +736,7 @@ class ReviewStore:
                 image_state.setdefault("correction_mode", "patch")
                 image_state.setdefault("prediction_actions", {})
                 image_state.setdefault("prediction_class_overrides", {})
+                image_state.setdefault("exclude_from_csv", False)
         store = cls(folder=folder, state_path=state_path, session_key=session_key, state=state)
         if store._apply_default_scale_profile():
             store.save()
@@ -827,6 +828,7 @@ class ReviewStore:
                     prediction_boxes=prediction_boxes,
                     image_natural_width=stored.get("image_natural_width"),
                     image_natural_height=stored.get("image_natural_height"),
+                    exclude_from_csv=bool(stored.get("exclude_from_csv")),
                     correction_mode=correction_mode,
                 )
             )
@@ -856,8 +858,11 @@ class ReviewStore:
 
         if decision == Decision.UNREVIEWED:
             image_state.pop("reviewed_at", None)
+            image_state["exclude_from_csv"] = False
         else:
             image_state["reviewed_at"] = utc_now_iso()
+            if decision == Decision.CORRECT:
+                image_state["exclude_from_csv"] = False
 
         self.save()
         return self.load_session()
@@ -977,6 +982,7 @@ class ReviewStore:
         polygons: list[dict[str, Any]],
         image_natural_width: int,
         image_natural_height: int,
+        exclude_from_csv: bool = False,
         correction_mode: str = "patch",
         prediction_actions: dict[str, str] | None = None,
         prediction_class_overrides: dict[str, str] | None = None,
@@ -1001,6 +1007,7 @@ class ReviewStore:
         image_state["polygons"] = normalized_polygons
         image_state["image_natural_width"] = image_natural_width
         image_state["image_natural_height"] = image_natural_height
+        image_state["exclude_from_csv"] = bool(exclude_from_csv)
         image_state["correction_mode"] = _normalize_correction_mode(correction_mode)
         image_state["prediction_actions"] = normalized_actions
         image_state["prediction_class_overrides"] = normalized_class_overrides
@@ -1017,8 +1024,11 @@ class ReviewStore:
             image_state["decision"] = decision.value
             if decision == Decision.UNREVIEWED:
                 image_state.pop("reviewed_at", None)
+                image_state["exclude_from_csv"] = False
             else:
                 image_state["reviewed_at"] = utc_now_iso()
+                if decision == Decision.CORRECT:
+                    image_state["exclude_from_csv"] = False
 
         self.save()
         return self.load_session()
@@ -1122,6 +1132,7 @@ class ReviewStore:
         for fname in filename_order:
             img_state = filename_to_state.get(fname, {})
             decision = img_state.get("decision", "unreviewed")
+            exclude_from_csv = bool(img_state.get("exclude_from_csv"))
             polygons = img_state.get("polygons", [])
             nat_w = img_state.get("image_natural_width", 0)
             nat_h = img_state.get("image_natural_height", 0)
@@ -1150,6 +1161,8 @@ class ReviewStore:
                     add_polygons.append(poly)
 
             has_merge_changes = (
+                exclude_from_csv
+                or
                 decision == "wrong"
                 or bool(polygons)
                 or any(action != "keep" for action in prediction_actions.values())
@@ -1165,6 +1178,9 @@ class ReviewStore:
                 continue
 
             replaced_count += 1
+
+            if exclude_from_csv:
+                continue
 
             if correction_mode == "redraw_all":
                 reusable_object_ids = list(unique_original_ids)

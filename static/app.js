@@ -9,6 +9,7 @@ const state = {
   metricModeOverride: "auto",
   queueCollapsed: true,
   correctionMode: "patch",
+  excludeFromCsv: false,
   predictionActions: {},
   predictionClassOverrides: {},
   activePredictionId: null,
@@ -332,12 +333,14 @@ function syncImageCorrectionState() {
   const image = currentImage();
   if (!image) {
     state.correctionMode = "patch";
+    state.excludeFromCsv = false;
     state.predictionActions = {};
     state.predictionClassOverrides = {};
     state.activePredictionId = null;
     return;
   }
   state.correctionMode = image.correction_mode === "redraw_all" ? "redraw_all" : "patch";
+  state.excludeFromCsv = !!image.exclude_from_csv;
   const actions = {};
   const classOverrides = {};
   for (const box of image.prediction_boxes || []) {
@@ -2453,6 +2456,7 @@ async function saveAnnotations() {
       polygons,
       image_natural_width: mainImage.naturalWidth || 1,
       image_natural_height: mainImage.naturalHeight || 1,
+      exclude_from_csv: !!state.excludeFromCsv,
       correction_mode: state.correctionMode,
       prediction_actions: state.predictionActions,
       prediction_class_overrides: state.predictionClassOverrides,
@@ -2460,6 +2464,8 @@ async function saveAnnotations() {
   });
   const payload = await response.json();
   state.session = payload.session;
+  syncImageCorrectionState();
+  updateDecisionDeleteButton(currentImage());
   // Update stats and queue badge without full re-render to avoid canvas disruption
   renderSummary();
   updateQueueItemBadge(image.relative_path);
@@ -2617,6 +2623,21 @@ function loadPolygonsForCurrentImage() {
   syncImageCorrectionState();
 }
 
+function updateDecisionDeleteButton(image = currentImage()) {
+  if (!decisionDeleteBtn) return;
+  if (!image) {
+    decisionDeleteBtn.disabled = true;
+    decisionDeleteBtn.textContent = "Delete from CSV (D)";
+    decisionDeleteBtn.title = "Exclude this image from the updated CSV export.";
+    return;
+  }
+  decisionDeleteBtn.disabled = false;
+  decisionDeleteBtn.textContent = state.excludeFromCsv ? "Excluded from CSV (D)" : "Delete from CSV (D)";
+  decisionDeleteBtn.title = state.excludeFromCsv
+    ? "This image will be omitted from the updated CSV export."
+    : "Exclude this image from the updated CSV export.";
+}
+
 function renderViewer() {
   const image = currentImage();
   const filtered = state.session ? filterImages(state.session.images, state.activeFilter) : [];
@@ -2626,13 +2647,13 @@ function renderViewer() {
   viewerTitle.textContent = hasImage ? image.filename : "No image in current filter";
   viewerSubtitle.textContent = state.session
     ? `${state.session.folder_path} | ${filtered.length} items in ${state.activeFilter} view`
-    : "Keyboard shortcuts: A accept, F fix, D delete, arrows navigate, Z undo.";
+    : "Keyboard shortcuts: A accept, F fix, D delete from CSV, arrows navigate, Z undo.";
 
   prevBtn.disabled = !hasImage || currentIndex <= 0;
   nextBtn.disabled = !hasImage || currentIndex === -1 || currentIndex >= filtered.length - 1;
   markCorrectBtn.disabled = !hasImage;
   markWrongBtn.disabled   = !hasImage;
-  if (decisionDeleteBtn) decisionDeleteBtn.disabled = !hasImage;
+  updateDecisionDeleteButton(image);
   clearBtn.disabled       = !hasImage;
 
   if (!hasImage) {
@@ -3305,6 +3326,8 @@ exportFilenamesBtn.addEventListener("click", async () => {
 
 markCorrectBtn.addEventListener("click", async () => {
   try {
+    state.excludeFromCsv = false;
+    await saveAnnotations();
     const changed = await updateDecision("correct");
     if (changed) {
       state.reviewMode = "decision";
@@ -3317,6 +3340,8 @@ markCorrectBtn.addEventListener("click", async () => {
 
 markWrongBtn.addEventListener("click", async () => {
   try {
+    state.excludeFromCsv = false;
+    await saveAnnotations();
     const changed = await updateDecision("wrong");
     if (changed) {
       state.reviewMode = "fix";
@@ -3331,16 +3356,13 @@ decisionDeleteBtn?.addEventListener("click", async () => {
   try {
     const image = currentImage();
     if (!image) return;
+    state.excludeFromCsv = true;
+    await saveAnnotations();
     if (image.decision !== "wrong") {
       await updateDecision("wrong");
-      state.reviewMode = "fix";
     }
-    const selectedId = state.activePredictionId || String(image.prediction_boxes?.[0]?.object_id || "");
-    if (!selectedId) throw new Error("Select an object in the right panel before delete.");
-    setPredictionAction(selectedId, "delete");
-    await saveAnnotations();
-    showToast("Marked object as delete.");
-    smartAdvanceAfterDelete(selectedId);
+    showToast("Image will be excluded from the updated CSV export.");
+    render();
   } catch (err) { showToast(err.message); }
 });
 
@@ -3352,7 +3374,10 @@ clearBtn.addEventListener("click", async () => {
   try {
     const previousPath = previousPathInCurrentFilter();
     const changed = await updateDecision("unreviewed", { preferredRelativePath: previousPath });
-    if (changed) showToast("Cleared review state.");
+    if (changed) {
+      state.excludeFromCsv = false;
+      showToast("Cleared review state.");
+    }
   }
   catch (err) { showToast(err.message); }
 });
@@ -3704,6 +3729,8 @@ window.addEventListener("keydown", async (event) => {
     } else if (event.key === "ArrowRight") {
       navigate(1);
     } else if (event.key.toLowerCase() === "a") {
+      state.excludeFromCsv = false;
+      await saveAnnotations();
       const changed = await updateDecision("correct");
       if (changed) {
         state.reviewMode = "decision";
@@ -3711,6 +3738,8 @@ window.addEventListener("keydown", async (event) => {
         smartAdvanceAfterAccept();
       }
     } else if (event.key.toLowerCase() === "f") {
+      state.excludeFromCsv = false;
+      await saveAnnotations();
       const changed = await updateDecision("wrong");
       if (changed) {
         state.reviewMode = "fix";
@@ -3722,6 +3751,8 @@ window.addEventListener("keydown", async (event) => {
     } else if (event.key.toLowerCase() === "z") {
       undoPolygonBtn.click();
     } else if (event.key.toLowerCase() === "c") {
+      state.excludeFromCsv = false;
+      await saveAnnotations();
       const changed = await updateDecision("correct");
       if (changed) {
         state.reviewMode = "decision";
@@ -3729,6 +3760,8 @@ window.addEventListener("keydown", async (event) => {
         smartAdvanceAfterAccept();
       }
     } else if (event.key.toLowerCase() === "w") {
+      state.excludeFromCsv = false;
+      await saveAnnotations();
       const changed = await updateDecision("wrong");
       if (changed) {
         state.reviewMode = "fix";

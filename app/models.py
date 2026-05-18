@@ -76,6 +76,7 @@ class ImageAnnotationUpdateRequest(BaseModel):
     polygons: list[PolygonAnnotation]
     image_natural_width: int
     image_natural_height: int
+    exclude_from_csv: bool = False
     correction_mode: str = Field(default="patch", pattern="^(patch|redraw_all)$")
     prediction_actions: dict[str, str] = Field(default_factory=dict)
     prediction_class_overrides: dict[str, str] = Field(default_factory=dict)
@@ -143,6 +144,7 @@ class ImageRecord(BaseModel):
     prediction_boxes: list[PredictionBox] = Field(default_factory=list)
     image_natural_width: int | None = None
     image_natural_height: int | None = None
+    exclude_from_csv: bool = False
     correction_mode: str = Field(default="patch", pattern="^(patch|redraw_all)$")
 
 
