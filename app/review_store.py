@@ -1256,7 +1256,25 @@ class ReviewStore:
             raise ValueError("Target image path is required before export.")
 
         target_folder = normalize_folder(target_folder_path)
-        return validate_relative_path(target_folder, relative_path)
+        try:
+            return validate_relative_path(target_folder, relative_path)
+        except (FileNotFoundError, ValueError):
+            pass
+
+        filename = Path(relative_path).name
+        matches = [
+            path for path in target_folder.rglob(filename)
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        ]
+        if not matches:
+            raise FileNotFoundError(
+                f"Image not found under target folder by relative path or filename: {filename}"
+            )
+        if len(matches) == 1:
+            return matches[0].resolve()
+
+        matches.sort(key=lambda path: (len(path.parts), str(path).lower()))
+        return matches[0].resolve()
 
     def export_selected(self) -> tuple[Path, str, int]:
         session = self.load_session()
@@ -1266,6 +1284,7 @@ class ReviewStore:
 
         if not session.target_folder_path:
             raise ValueError("Target image path is required before export.")
+        target_folder = normalize_folder(session.target_folder_path)
 
         export_time = utc_now_iso()
         export_base_name = infer_export_base_name(selected_images, self.session_key)
@@ -1299,7 +1318,7 @@ class ReviewStore:
                     "export_relative_path": export_relative_path,
                     "source_path": str((self.folder / item.relative_path).resolve()),
                     "target_filename": target_path.name,
-                    "target_relative_path": item.relative_path,
+                    "target_relative_path": relative_to_folder(target_folder, target_path),
                     "target_source_path": str(target_path),
                     "decision": item.decision.value,
                     "reviewed_at": item.reviewed_at,
