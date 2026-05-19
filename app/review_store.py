@@ -418,10 +418,12 @@ def build_summary(images: list[ImageRecord]) -> SessionSummary:
 
 
 def build_csv(rows: list[dict[str, Any]]) -> str:
-    header = [
+    base_header = [
         "index",
         "filename",
         "relative_path",
+        "surface_folder",
+        "export_relative_path",
         "source_path",
         "target_filename",
         "target_relative_path",
@@ -429,8 +431,15 @@ def build_csv(rows: list[dict[str, Any]]) -> str:
         "decision",
         "reviewed_at",
     ]
+    extra_fields = [
+        key
+        for row in rows
+        for key in row.keys()
+        if key not in base_header
+    ]
+    header = list(dict.fromkeys(base_header + extra_fields))
     output = _ListWriter()
-    writer = csv.DictWriter(output, fieldnames=header)
+    writer = csv.DictWriter(output, fieldnames=header, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
         writer.writerow(row)
